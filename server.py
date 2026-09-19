@@ -326,7 +326,15 @@ def api_serve_image(category: str, filename: str):
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Image not found")
 
-    return FileResponse(path, media_type="image/jpeg")
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
 
 
 @app.get("/api/process/stream")

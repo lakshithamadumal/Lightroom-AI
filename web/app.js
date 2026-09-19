@@ -445,7 +445,11 @@ async function loadPhotos() {
   try {
     const res = await fetch("/api/photos/incoming");
     const data = await res.json();
-    state.photos = data.photos || [];
+    const timestamp = Date.now();
+    state.photos = (data.photos || []).map((p) => ({
+      ...p,
+      cacheBuster: timestamp,
+    }));
 
     const total = data.total || 0;
     const processed = data.processed_count || 0;
@@ -507,6 +511,7 @@ function createAirbnbPhotoCard(photo, index) {
 
   const isProcessed = photo.is_processed;
   const isRunning = state.isProcessing && !isProcessed;
+  const outUrlWithBuster = photo.output_url ? `${photo.output_url}?t=${photo.cacheBuster || Date.now()}` : "";
 
   // Determine active configuration flags
   const isCrop = state.config.ENABLE_AI_SMART_CROP !== false;
@@ -542,7 +547,7 @@ function createAirbnbPhotoCard(photo, index) {
   if (isProcessed) {
     rightContainerHtml = `
       <div class="relative aspect-[3/2] w-full rounded-2xl overflow-hidden bg-black/5 border border-rose-100 hover:border-[#FF385C]/50 cursor-pointer group shadow-xs" onclick="openInspectorByName('${photo.filename}')">
-        <img src="${photo.output_url}" alt="AI Graded" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+        <img src="${outUrlWithBuster}" alt="AI Graded" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
         <span class="absolute bottom-3 right-3 px-3 py-1 rounded-full bg-[#FF385C] text-[10px] font-extrabold tracking-wider text-white uppercase shadow-sm">
           ${afterOverlayBadge}
         </span>
@@ -621,7 +626,7 @@ function createAirbnbPhotoCard(photo, index) {
             ? `<button onclick="openInspectorByName('${photo.filename}')" class="px-4 py-2 rounded-full bg-[#F7F7F7] hover:bg-[#EBEBEB] text-[#222222] text-xs font-bold flex items-center gap-1.5 transition-colors border border-[#DDDDDD] shadow-2xs" title="Inspect & Tune Sliders">
                  <i data-lucide="sliders" class="w-3.5 h-3.5 text-[#717171]"></i> Inspect & Fine-Tune
                </button>
-               <a href="${photo.output_url}" download="${photo.output_filename}" class="px-4 py-2 rounded-full bg-[#FF385C] hover:bg-[#E00B41] text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs" title="Download Master Photo">
+               <a href="${outUrlWithBuster}" download="${photo.output_filename}" class="px-4 py-2 rounded-full bg-[#FF385C] hover:bg-[#E00B41] text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs" title="Download Master Photo">
                  <i data-lucide="download" class="w-3.5 h-3.5"></i> Download Master
                </a>`
             : (isRunning
@@ -958,7 +963,7 @@ window.openInspector = function(photo) {
   if (filenameEl) filenameEl.textContent = photo.filename;
   if (origImg) origImg.src = photo.input_url;
   if (procImg) {
-    procImg.src = photo.output_url || photo.input_url;
+    procImg.src = photo.output_url ? `${photo.output_url}?t=${photo.cacheBuster || Date.now()}` : photo.input_url;
     procImg.style.filter = "none";
   }
 
@@ -1099,7 +1104,9 @@ function resetSliders(triggerUpdate = true) {
 
   if (triggerUpdate && state.activeInspectorPhoto) {
     if (procImg) {
-      procImg.src = state.activeInspectorPhoto.output_url || state.activeInspectorPhoto.input_url;
+      procImg.src = state.activeInspectorPhoto.output_url
+        ? `${state.activeInspectorPhoto.output_url}?t=${state.activeInspectorPhoto.cacheBuster || Date.now()}`
+        : state.activeInspectorPhoto.input_url;
     }
   }
 }
