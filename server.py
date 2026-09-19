@@ -123,6 +123,67 @@ def save_override_params(output_folder: str, filename: str, params: dict):
         print(f"   > [OVERRIDES] Error saving overrides: {e}")
 
 
+def apply_adjustments(img: np.ndarray, req: AdjustRequest) -> np.ndarray:
+    """
+    Applies unified color, lighting, temperature, vibrance, clarity & crop refinements
+    to a base develop image.
+    """
+    img_float = img.astype(np.float32)
+
+    # 1. Exposure (EV linear scaling)
+    if req.exposure != 0:
+        img_float = img_float * (2 ** req.exposure)
+
+    # 2. Contrast
+    if req.contrast != 0:
+        c_mult = 1.0 + (req.contrast / 100.0) * 0.5
+        img_float = ((img_float - 128.0) * c_mult) + 128.0
+
+    # 3. Highlights Recovery / Boost
+    if req.highlights != 0:
+        hl_mask = np.clip((img_float - 128.0) / 127.0, 0, 1) ** 1.3
+        img_float += hl_mask * (req.highlights * 0.4)
+
+    # 4. Shadows Lift / Darken
+    if req.shadows != 0:
+        sh_mask = np.clip((128.0 - img_float) / 128.0, 0, 1) ** 1.3
+        img_float += sh_mask * (req.shadows * 0.5)
+
+    img_out = np.clip(img_float, 0, 255).astype(np.uint8)
+
+    # 5. Temperature & Tint
+    if req.temperature != 0 or req.tint != 0:
+        b, g, r = cv2.split(img_out.astype(np.float32))
+        r = np.clip(r + (req.temperature * 1.2) + (req.tint * 0.5), 0, 255)
+        g = np.clip(g - (req.tint * 0.8), 0, 255)
+        b = np.clip(b - (req.temperature * 1.2), 0, 255)
+        img_out = cv2.merge([b, g, r]).astype(np.uint8)
+
+    # 6. Vibrance
+    if req.vibrance != 0:
+        hsv = cv2.cvtColor(img_out, cv2.COLOR_BGR2HSV).astype(np.float32)
+        sat_mask = 1.0 - (hsv[:, :, 1] / 255.0)
+        hsv[:, :, 1] = np.clip(hsv[:, :, 1] + (hsv[:, :, 1] * (req.vibrance / 100.0) * sat_mask * 0.8), 0, 255)
+        img_out = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+
+    # 7. Clarity & Detail
+    if req.clarity > 0:
+        blurred = cv2.GaussianBlur(img_out, (0, 0), sigmaX=3.0)
+        img_out = np.clip(cv2.addWeighted(img_out, 1.0 + (req.clarity / 100.0), blurred, -(req.clarity / 100.0), 0), 0, 255)
+
+    # 8. Crop Refinements (if user moved crop sliders)
+    if req.crop_top > 0 or req.crop_bottom > 0 or req.crop_left > 0 or req.crop_right > 0:
+        ch, cw = img_out.shape[:2]
+        y1 = int(ch * np.clip(req.crop_top, 0.0, 0.45))
+        y2 = int(ch * (1.0 - np.clip(req.crop_bottom, 0.0, 0.45)))
+        x1 = int(cw * np.clip(req.crop_left, 0.0, 0.45))
+        x2 = int(cw * (1.0 - np.clip(req.crop_right, 0.0, 0.45)))
+        if (x2 - x1) > 100 and (y2 - y1) > 100:
+            img_out = img_out[y1:y2, x1:x2]
+
+    return img_out
+
+
 def _open_native_dialog(dialog_type: str, initial_dir: str):
     import tkinter as tk
     from tkinter import filedialog
@@ -448,68 +509,74 @@ async def api_process_stream(request: Request):
 
                 h, w = img.shape[:2]
 
-                # Step 1: Preset Color Grading
+                # Step 1: Preset Color Grading (Pure 3D LUT)
                 yield f"data: {json.dumps({'type': 'step_preset', 'index': idx, 'filename': filename})}\n\n"
                 preset_applied = preset_mgr.apply_preset(img)
                 await asyncio.sleep(0.05)
 
-                # Step 2: Per-Photo Dynamic Adjustment
-                yield f"data: {json.dumps({'type': 'step_adjust', 'index': idx, 'filename': filename})}\n\n"
-                if cfg["ENABLE_AUTO_BALANCING"]:
-                    adjusted, telemetry = adjuster.fine_tune(preset_applied)
-                else:
-                    adjusted = preset_applied
-                    telemetry = {"exp_shift_ev": 0.0, "shadow_lift_pct": 0, "highlight_comp_pct": 0, "wb_status": "Manual"}
-                await asyncio.sleep(0.05)
-
-                # Step 3: Smart Landscape AI Cropping
+                # Step 2: Smart Landscape AI Cropping (on preset image)
                 if cfg["ENABLE_AI_SMART_CROP"]:
                     yield f"data: {json.dumps({'type': 'step_crop', 'index': idx, 'filename': filename})}\n\n"
-                    cropped, crop_telemetry = cropper.crop_best_landscape(adjusted, enable_ai=True)
+                    cropped, crop_telemetry = cropper.crop_best_landscape(preset_applied, enable_ai=True)
                     await asyncio.sleep(0.05)
                 else:
-                    cropped = adjusted
+                    cropped = preset_applied
                     crop_telemetry = {"method": "Original (No Crop)", "trim_x_pct": 0, "trim_y_pct": 0, "notes": "AI Crop disabled in settings"}
 
-                # Step 4: Scale to High-Res Master & Export (Preserves 100% Full Resolution if TARGET_MAX_WIDTH is 0)
+                # Scale to High-Res Base Develop Image
                 ch, cw = cropped.shape[:2]
                 target_w = int(cfg.get("TARGET_MAX_WIDTH", 0))
                 if target_w > 0 and cw > target_w:
                     new_w = target_w
                     new_h = int(ch * (target_w / cw))
-                    final_img = cv2.resize(cropped, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+                    base_img = cv2.resize(cropped, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
                 else:
-                    final_img = cropped
+                    base_img = cropped
 
                 jpeg_quality = int(cfg.get("JPEG_QUALITY", 100))
                 base_name, _ = os.path.splitext(filename)
                 out_filename = f"{base_name}.jpg"
                 out_path = os.path.join(output_dir, out_filename)
 
-                # Save pristine calibrated master to .base folder
+                # Save pristine 3D LUT preset base image to .base folder
                 base_dir = os.path.join(output_dir, ".base")
                 os.makedirs(base_dir, exist_ok=True)
                 base_img_path = os.path.join(base_dir, out_filename)
-                cv2.imwrite(base_img_path, final_img, [
+                cv2.imwrite(base_img_path, base_img, [
                     int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality,
                     int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
                 ])
 
-                # Save master output
+                # Step 3: Per-Photo Dynamic AI Balancing & Slider Parameter Mapping
+                yield f"data: {json.dumps({'type': 'step_adjust', 'index': idx, 'filename': filename})}\n\n"
+                if cfg["ENABLE_AUTO_BALANCING"]:
+                    ai_res = adjuster.analyze_params(base_img)
+                    ai_adj = {
+                        "exposure": ai_res.get("exposure", 0.0),
+                        "contrast": ai_res.get("contrast", 0.0),
+                        "shadows": ai_res.get("shadows", 0.0),
+                        "highlights": ai_res.get("highlights", 0.0),
+                        "temperature": ai_res.get("temperature", 0.0),
+                        "vibrance": ai_res.get("vibrance", 0.0),
+                        "clarity": ai_res.get("clarity", 0.0),
+                        "crop_top": 0.0,
+                        "crop_bottom": 0.0,
+                    }
+                    telemetry = ai_res.get("telemetry", {})
+                    req_obj = AdjustRequest(filename=filename, **ai_adj)
+                    final_img = apply_adjustments(base_img, req_obj)
+                    save_override_params(output_dir, filename, ai_adj)
+                else:
+                    final_img = base_img
+                    telemetry = {"exp_shift_ev": 0.0, "shadow_lift_pct": 0, "highlight_comp_pct": 0, "wb_status": "Manual"}
+                    save_override_params(output_dir, filename, DEFAULT_ADJUSTMENTS.copy())
+                await asyncio.sleep(0.05)
+
+                # Step 4: Export Master Output
                 cv2.imwrite(out_path, final_img, [
                     int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality,
                     int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
                 ])
-
-                # Reset overrides for newly processed photo
-                ov = load_overrides(output_dir)
-                if filename in ov:
-                    del ov[filename]
-                    try:
-                        with open(_get_overrides_file(output_dir), "w", encoding="utf-8") as f:
-                            json.dump(ov, f, indent=2)
-                    except Exception:
-                        pass
 
                 yield f"data: {json.dumps({'type': 'photo_done', 'index': idx, 'total': len(files), 'filename': filename, 'output_filename': out_filename, 'input_url': f'/api/image/incoming/{urllib.parse.quote(filename)}', 'output_url': f'/api/image/output/{urllib.parse.quote(out_filename)}', 'dimensions': f'{final_img.shape[1]}x{final_img.shape[0]}', 'adjust_telemetry': telemetry, 'crop_telemetry': crop_telemetry})}\n\n"
                 await asyncio.sleep(0.1)
@@ -526,7 +593,7 @@ async def api_process_stream(request: Request):
 def api_adjust_preview(req: AdjustRequest):
     """
     Ultra-fast (sub-15ms) live preview with manual slider adjustments for single-photo editing.
-    Preserves existing AI Smart Crop & base develop calibration.
+    Calculated on top of the clean 3D LUT preset base image.
     """
     cfg = get_config()
     input_path = os.path.join(cfg["INPUT_FOLDER"], req.filename)
@@ -537,16 +604,11 @@ def api_adjust_preview(req: AdjustRequest):
     os.makedirs(base_dir, exist_ok=True)
     base_path = os.path.join(base_dir, out_filename)
 
-    # Always load from the clean base develop image
+    # Always load from the clean base develop image (3D LUT preset applied)
     if os.path.exists(base_path):
         img = cv2.imread(base_path)
     elif os.path.exists(out_path):
-        import shutil
-        try:
-            shutil.copy2(out_path, base_path)
-        except Exception:
-            pass
-        img = cv2.imread(base_path) if os.path.exists(base_path) else cv2.imread(out_path)
+        img = cv2.imread(out_path)
     elif os.path.exists(input_path):
         raw_img = cv2.imread(input_path)
         if raw_img is None:
@@ -567,58 +629,7 @@ def api_adjust_preview(req: AdjustRequest):
     else:
         img_work = img.copy()
 
-    # Apply Overrides on fast working buffer
-    img_float = img_work.astype(np.float32)
-
-    # Exposure override
-    if req.exposure != 0:
-        img_float = img_float * (2 ** req.exposure)
-
-    # Contrast override
-    if req.contrast != 0:
-        c_mult = 1.0 + (req.contrast / 100.0) * 0.5
-        img_float = ((img_float - 128.0) * c_mult) + 128.0
-
-    # Shadows & Highlights
-    if req.highlights != 0:
-        hl_mask = np.clip((img_float - 128.0) / 127.0, 0, 1) ** 1.3
-        img_float += hl_mask * (req.highlights * 0.4)
-
-    if req.shadows != 0:
-        sh_mask = np.clip((128.0 - img_float) / 128.0, 0, 1) ** 1.3
-        img_float += sh_mask * (req.shadows * 0.5)
-
-    img_out = np.clip(img_float, 0, 255).astype(np.uint8)
-
-    # Temperature & Tint
-    if req.temperature != 0 or req.tint != 0:
-        b, g, r = cv2.split(img_out.astype(np.float32))
-        r = np.clip(r + (req.temperature * 1.2) + (req.tint * 0.5), 0, 255)
-        g = np.clip(g - (req.tint * 0.8), 0, 255)
-        b = np.clip(b - (req.temperature * 1.2), 0, 255)
-        img_out = cv2.merge([b, g, r]).astype(np.uint8)
-
-    # Vibrance override
-    if req.vibrance != 0:
-        hsv = cv2.cvtColor(img_out, cv2.COLOR_BGR2HSV).astype(np.float32)
-        sat_mask = 1.0 - (hsv[:, :, 1] / 255.0)
-        hsv[:, :, 1] = np.clip(hsv[:, :, 1] + (hsv[:, :, 1] * (req.vibrance / 100.0) * sat_mask * 0.8), 0, 255)
-        img_out = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
-
-    # Clarity / Detail
-    if req.clarity > 0:
-        blurred = cv2.GaussianBlur(img_out, (0, 0), sigmaX=3.0)
-        img_out = np.clip(cv2.addWeighted(img_out, 1.0 + (req.clarity / 100.0), blurred, -(req.clarity / 100.0), 0), 0, 255)
-
-    # Crop Overrides (if user explicitly adjusts crop sliders)
-    if req.crop_top > 0 or req.crop_bottom > 0 or req.crop_left > 0 or req.crop_right > 0:
-        ch, cw = img_out.shape[:2]
-        y1 = int(ch * np.clip(req.crop_top, 0.0, 0.45))
-        y2 = int(ch * (1.0 - np.clip(req.crop_bottom, 0.0, 0.45)))
-        x1 = int(cw * np.clip(req.crop_left, 0.0, 0.45))
-        x2 = int(cw * (1.0 - np.clip(req.crop_right, 0.0, 0.45)))
-        if (x2 - x1) > 100 and (y2 - y1) > 100:
-            img_out = img_out[y1:y2, x1:x2]
+    img_out = apply_adjustments(img_work, req)
 
     _, buffer = cv2.imencode(".jpg", img_out, [cv2.IMWRITE_JPEG_QUALITY, 85])
     b64_preview = base64.b64encode(buffer).decode("utf-8")
@@ -634,7 +645,7 @@ def api_adjust_preview(req: AdjustRequest):
 def api_adjust_save(req: AdjustRequest):
     """
     Saves the custom adjusted high-resolution image directly to OUTPUT_FOLDER.
-    Preserves AI Smart Crop & develops high-fidelity master output.
+    Preserves base 3D LUT preset & develops high-fidelity master output.
     """
     cfg = get_config()
     input_path = os.path.join(cfg["INPUT_FOLDER"], req.filename)
@@ -645,16 +656,11 @@ def api_adjust_save(req: AdjustRequest):
     os.makedirs(base_dir, exist_ok=True)
     base_path = os.path.join(base_dir, out_filename)
 
-    # Load from clean base develop image
+    # Load from clean base develop image (3D LUT preset applied)
     if os.path.exists(base_path):
         img = cv2.imread(base_path)
     elif os.path.exists(out_path):
-        import shutil
-        try:
-            shutil.copy2(out_path, base_path)
-        except Exception:
-            pass
-        img = cv2.imread(base_path) if os.path.exists(base_path) else cv2.imread(out_path)
+        img = cv2.imread(out_path)
     elif os.path.exists(input_path):
         raw_img = cv2.imread(input_path)
         preset_mgr = PresetManager(preset_folder=cfg["PRESET_FOLDER"])
@@ -666,47 +672,7 @@ def api_adjust_save(req: AdjustRequest):
     if img is None:
         raise HTTPException(status_code=400, detail="Cannot read image")
 
-    img_float = img.astype(np.float32)
-
-    if req.exposure != 0:
-        img_float = img_float * (2 ** req.exposure)
-    if req.contrast != 0:
-        c_mult = 1.0 + (req.contrast / 100.0) * 0.5
-        img_float = ((img_float - 128.0) * c_mult) + 128.0
-    if req.highlights != 0:
-        hl_mask = np.clip((img_float - 128.0) / 127.0, 0, 1) ** 1.3
-        img_float += hl_mask * (req.highlights * 0.4)
-    if req.shadows != 0:
-        sh_mask = np.clip((128.0 - img_float) / 128.0, 0, 1) ** 1.3
-        img_float += sh_mask * (req.shadows * 0.5)
-
-    img_out = np.clip(img_float, 0, 255).astype(np.uint8)
-
-    if req.temperature != 0 or req.tint != 0:
-        b, g, r = cv2.split(img_out.astype(np.float32))
-        r = np.clip(r + (req.temperature * 1.2) + (req.tint * 0.5), 0, 255)
-        g = np.clip(g - (req.tint * 0.8), 0, 255)
-        b = np.clip(b - (req.temperature * 1.2), 0, 255)
-        img_out = cv2.merge([b, g, r]).astype(np.uint8)
-
-    if req.vibrance != 0:
-        hsv = cv2.cvtColor(img_out, cv2.COLOR_BGR2HSV).astype(np.float32)
-        sat_mask = 1.0 - (hsv[:, :, 1] / 255.0)
-        hsv[:, :, 1] = np.clip(hsv[:, :, 1] + (hsv[:, :, 1] * (req.vibrance / 100.0) * sat_mask * 0.8), 0, 255)
-        img_out = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
-
-    if req.clarity > 0:
-        blurred = cv2.GaussianBlur(img_out, (0, 0), sigmaX=3.0)
-        img_out = np.clip(cv2.addWeighted(img_out, 1.0 + (req.clarity / 100.0), blurred, -(req.clarity / 100.0), 0), 0, 255)
-
-    if req.crop_top > 0 or req.crop_bottom > 0 or req.crop_left > 0 or req.crop_right > 0:
-        ch, cw = img_out.shape[:2]
-        y1 = int(ch * np.clip(req.crop_top, 0.0, 0.45))
-        y2 = int(ch * (1.0 - np.clip(req.crop_bottom, 0.0, 0.45)))
-        x1 = int(cw * np.clip(req.crop_left, 0.0, 0.45))
-        x2 = int(cw * (1.0 - np.clip(req.crop_right, 0.0, 0.45)))
-        if (x2 - x1) > 100 and (y2 - y1) > 100:
-            img_out = img_out[y1:y2, x1:x2]
+    img_out = apply_adjustments(img, req)
 
     # Save directly at 100% maximum quality & full resolution
     jpeg_quality = int(cfg.get("JPEG_QUALITY", 100))

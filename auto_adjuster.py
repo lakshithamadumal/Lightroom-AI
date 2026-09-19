@@ -22,6 +22,63 @@ class AutoAdjuster:
             self.model = model
         self.clahe = cv2.createCLAHE(clipLimit=1.2, tileGridSize=(8, 8))
 
+    def analyze_params(self, image_bgr, enable_ai=True):
+        """
+        Analyzes lighting balance and returns calculated adjustment parameters dict:
+        { 'exposure': exp_shift, 'shadows': shadow_lift, 'highlights': -hl_comp, ... }
+        """
+        lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB)
+        l_channel, _, _ = cv2.split(lab)
+        current_median = float(np.median(l_channel))
+
+        exp_shift = 0.0
+        shadow_lift = 0
+        hl_comp = 0
+        ai_source = "Histogram Auto-Analysis"
+
+        # AI-Assisted Lighting Analysis
+        if enable_ai and self.api_key and self.api_key != "your_actual_api_key_here":
+            ai_params = self._get_ai_lighting_params(image_bgr)
+            if ai_params:
+                exp_shift = ai_params.get("exposure_ev", 0.0)
+                shadow_lift = ai_params.get("shadow_lift_pct", 0)
+                hl_comp = ai_params.get("highlight_comp_pct", 0)
+                ai_source = f"OrcaRouter AI ({self.model})"
+
+        # Dynamic histogram balancing fallback
+        if exp_shift == 0.0 and current_median > 10:
+            if current_median < 110:
+                gamma = float(np.clip(np.log(self.target_median_lum / 255.0) / np.log(current_median / 255.0), 0.80, 1.25))
+                exp_shift = round((1.0 - gamma) * 1.2, 2)
+                shadow_lift = int(min(15, (110 - current_median) * 0.2))
+            elif current_median > 155:
+                exp_shift = -0.20
+                hl_comp = 8
+
+        exp_shift = float(np.clip(exp_shift, -0.50, +0.65))
+        shadow_lift = int(np.clip(shadow_lift, 0, 18))
+        hl_comp = int(np.clip(hl_comp, 0, 12))
+
+        return {
+            "exposure": round(exp_shift, 2),
+            "contrast": 0.0,
+            "shadows": float(shadow_lift),
+            "highlights": float(-hl_comp),
+            "temperature": 0.0,
+            "vibrance": 0.0,
+            "clarity": 0.0,
+            "crop_top": 0.0,
+            "crop_bottom": 0.0,
+            "telemetry": {
+                "initial_median": round(current_median, 1),
+                "exp_shift_ev": exp_shift,
+                "shadow_lift_pct": shadow_lift,
+                "highlight_comp_pct": hl_comp,
+                "engine": ai_source,
+                "style_preservation": "100% LUT Color & Mood Intact"
+            }
+        }
+
     def fine_tune(self, image_bgr, enable_ai=True):
         """
         Applies style-preserving luminance adjustments and returns (adjusted_img, telemetry).
