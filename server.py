@@ -85,6 +85,44 @@ class AdjustRequest(BaseModel):
     crop_right: float = 0.0    # Normalized right crop (0.0 to 0.4)
 
 
+DEFAULT_ADJUSTMENTS = {
+    "exposure": 0.0,
+    "contrast": 0.0,
+    "shadows": 0.0,
+    "highlights": 0.0,
+    "temperature": 0.0,
+    "vibrance": 0.0,
+    "clarity": 0.0,
+    "crop_top": 0.0,
+    "crop_bottom": 0.0,
+}
+
+
+def _get_overrides_file(output_folder: str) -> str:
+    return os.path.join(output_folder, ".overrides.json")
+
+
+def load_overrides(output_folder: str) -> dict:
+    ov_file = _get_overrides_file(output_folder)
+    if os.path.exists(ov_file):
+        try:
+            with open(ov_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_override_params(output_folder: str, filename: str, params: dict):
+    ov = load_overrides(output_folder)
+    ov[filename] = params
+    try:
+        with open(_get_overrides_file(output_folder), "w", encoding="utf-8") as f:
+            json.dump(ov, f, indent=2)
+    except Exception as e:
+        print(f"   > [OVERRIDES] Error saving overrides: {e}")
+
+
 def _open_native_dialog(dialog_type: str, initial_dir: str):
     import tkinter as tk
     from tkinter import filedialog
@@ -281,6 +319,7 @@ def api_get_incoming_photos():
 
     valid_exts = ('.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG', '.dng', '.DNG')
     files = [f for f in os.listdir(input_dir) if f.lower().endswith(valid_exts)]
+    overrides = load_overrides(output_dir)
 
     items = []
     for f in sorted(files):
@@ -297,7 +336,8 @@ def api_get_incoming_photos():
             "is_processed": is_processed,
             "size_mb": size_mb,
             "input_url": f"/api/image/incoming/{urllib.parse.quote(f)}",
-            "output_url": f"/api/image/output/{urllib.parse.quote(out_name)}" if is_processed else None
+            "output_url": f"/api/image/output/{urllib.parse.quote(out_name)}" if is_processed else None,
+            "adjustments": overrides.get(f, DEFAULT_ADJUSTMENTS.copy())
         })
 
     return {
@@ -445,10 +485,31 @@ async def api_process_stream(request: Request):
                 base_name, _ = os.path.splitext(filename)
                 out_filename = f"{base_name}.jpg"
                 out_path = os.path.join(output_dir, out_filename)
+
+                # Save pristine calibrated master to .base folder
+                base_dir = os.path.join(output_dir, ".base")
+                os.makedirs(base_dir, exist_ok=True)
+                base_img_path = os.path.join(base_dir, out_filename)
+                cv2.imwrite(base_img_path, final_img, [
+                    int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality,
+                    int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
+                ])
+
+                # Save master output
                 cv2.imwrite(out_path, final_img, [
                     int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality,
                     int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
                 ])
+
+                # Reset overrides for newly processed photo
+                ov = load_overrides(output_dir)
+                if filename in ov:
+                    del ov[filename]
+                    try:
+                        with open(_get_overrides_file(output_dir), "w", encoding="utf-8") as f:
+                            json.dump(ov, f, indent=2)
+                    except Exception:
+                        pass
 
                 yield f"data: {json.dumps({'type': 'photo_done', 'index': idx, 'total': len(files), 'filename': filename, 'output_filename': out_filename, 'input_url': f'/api/image/incoming/{urllib.parse.quote(filename)}', 'output_url': f'/api/image/output/{urllib.parse.quote(out_filename)}', 'dimensions': f'{final_img.shape[1]}x{final_img.shape[0]}', 'adjust_telemetry': telemetry, 'crop_telemetry': crop_telemetry})}\n\n"
                 await asyncio.sleep(0.1)
@@ -470,17 +531,29 @@ def api_adjust_preview(req: AdjustRequest):
     cfg = get_config()
     input_path = os.path.join(cfg["INPUT_FOLDER"], req.filename)
     base_name, _ = os.path.splitext(req.filename)
-    out_path = os.path.join(cfg["OUTPUT_FOLDER"], f"{base_name}.jpg")
+    out_filename = f"{base_name}.jpg"
+    out_path = os.path.join(cfg["OUTPUT_FOLDER"], out_filename)
+    base_dir = os.path.join(cfg["OUTPUT_FOLDER"], ".base")
+    os.makedirs(base_dir, exist_ok=True)
+    base_path = os.path.join(base_dir, out_filename)
 
-    # If already processed, start directly from the AI-cropped & graded photo
-    if os.path.exists(out_path):
-        img = cv2.imread(out_path)
+    # Always load from the clean base develop image
+    if os.path.exists(base_path):
+        img = cv2.imread(base_path)
+    elif os.path.exists(out_path):
+        import shutil
+        try:
+            shutil.copy2(out_path, base_path)
+        except Exception:
+            pass
+        img = cv2.imread(base_path) if os.path.exists(base_path) else cv2.imread(out_path)
     elif os.path.exists(input_path):
         raw_img = cv2.imread(input_path)
         if raw_img is None:
             raise HTTPException(status_code=400, detail="Cannot read image")
         preset_mgr = PresetManager(preset_folder=cfg["PRESET_FOLDER"])
         img = preset_mgr.apply_preset(raw_img)
+        cv2.imwrite(base_path, img)
     else:
         raise HTTPException(status_code=404, detail="Photo not found")
 
@@ -568,13 +641,25 @@ def api_adjust_save(req: AdjustRequest):
     base_name, _ = os.path.splitext(req.filename)
     out_filename = f"{base_name}.jpg"
     out_path = os.path.join(cfg["OUTPUT_FOLDER"], out_filename)
+    base_dir = os.path.join(cfg["OUTPUT_FOLDER"], ".base")
+    os.makedirs(base_dir, exist_ok=True)
+    base_path = os.path.join(base_dir, out_filename)
 
-    if os.path.exists(out_path):
-        img = cv2.imread(out_path)
+    # Load from clean base develop image
+    if os.path.exists(base_path):
+        img = cv2.imread(base_path)
+    elif os.path.exists(out_path):
+        import shutil
+        try:
+            shutil.copy2(out_path, base_path)
+        except Exception:
+            pass
+        img = cv2.imread(base_path) if os.path.exists(base_path) else cv2.imread(out_path)
     elif os.path.exists(input_path):
         raw_img = cv2.imread(input_path)
         preset_mgr = PresetManager(preset_folder=cfg["PRESET_FOLDER"])
         img = preset_mgr.apply_preset(raw_img)
+        cv2.imwrite(base_path, img)
     else:
         raise HTTPException(status_code=404, detail="Photo not found")
 
@@ -630,11 +715,25 @@ def api_adjust_save(req: AdjustRequest):
         int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
     ])
 
+    adj_dict = {
+        "exposure": req.exposure,
+        "contrast": req.contrast,
+        "shadows": req.shadows,
+        "highlights": req.highlights,
+        "temperature": req.temperature,
+        "vibrance": req.vibrance,
+        "clarity": req.clarity,
+        "crop_top": req.crop_top,
+        "crop_bottom": req.crop_bottom,
+    }
+    save_override_params(cfg["OUTPUT_FOLDER"], req.filename, adj_dict)
+
     return {
         "status": "saved",
         "output_filename": out_filename,
         "output_url": f"/api/image/output/{urllib.parse.quote(out_filename)}",
-        "dimension": f"{img_out.shape[1]}x{img_out.shape[0]}"
+        "dimension": f"{img_out.shape[1]}x{img_out.shape[0]}",
+        "adjustments": adj_dict
     }
 
 

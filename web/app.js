@@ -950,6 +950,37 @@ window.openInspectorByName = function(filename) {
 let inspectorClosing = false;
 let livePreviewDebounceTimer = null;
 
+function setSliderValues(adj = {}) {
+  const defaults = {
+    slideExposure: adj.exposure !== undefined ? adj.exposure : 0.0,
+    slideContrast: adj.contrast !== undefined ? adj.contrast : 0,
+    slideShadows: adj.shadows !== undefined ? adj.shadows : 0,
+    slideHighlights: adj.highlights !== undefined ? adj.highlights : 0,
+    slideTemp: adj.temperature !== undefined ? adj.temperature : 0,
+    slideVibrance: adj.vibrance !== undefined ? adj.vibrance : 0,
+    slideClarity: adj.clarity !== undefined ? adj.clarity : 0,
+    slideCropTop: adj.crop_top !== undefined ? adj.crop_top : 0,
+    slideCropBottom: adj.crop_bottom !== undefined ? adj.crop_bottom : 0,
+  };
+
+  Object.entries(defaults).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.value = val;
+      const valId = "val" + id.replace("slide", "");
+      const span = document.getElementById(valId);
+      if (span) {
+        if (id === "slideExposure") {
+          const num = parseFloat(val) || 0;
+          span.textContent = num > 0 ? `+${num.toFixed(2)}` : (num < 0 ? num.toFixed(2) : "0.00");
+        } else {
+          span.textContent = val;
+        }
+      }
+    }
+  });
+}
+
 window.openInspector = function(photo) {
   state.activeInspectorPhoto = photo;
 
@@ -967,8 +998,8 @@ window.openInspector = function(photo) {
     procImg.style.filter = "none";
   }
 
-  // Reset sliders without trigger
-  resetSliders(false);
+  // Populate sliders with this photo's saved adjustment values
+  setSliderValues(photo.adjustments || {});
 
   if (!modal || !backdrop || !card) return;
 
@@ -1059,7 +1090,14 @@ function initSliderValueTrackers() {
     const valSpan = document.getElementById(valId);
     if (slider) {
       slider.addEventListener("input", (e) => {
-        if (valSpan) valSpan.textContent = e.target.value;
+        if (valSpan) {
+          if (sliderId === "slideExposure") {
+            const num = parseFloat(e.target.value) || 0;
+            valSpan.textContent = num > 0 ? `+${num.toFixed(2)}` : (num < 0 ? num.toFixed(2) : "0.00");
+          } else {
+            valSpan.textContent = e.target.value;
+          }
+        }
         triggerLivePreview();
       });
     }
@@ -1077,37 +1115,13 @@ function initSliderValueTrackers() {
 }
 
 function resetSliders(triggerUpdate = true) {
-  const defaults = {
-    slideExposure: "0.0",
-    slideContrast: "0",
-    slideShadows: "0",
-    slideHighlights: "0",
-    slideTemp: "0",
-    slideVibrance: "0",
-    slideClarity: "0",
-    slideCropTop: "0",
-    slideCropBottom: "0",
-  };
-
-  Object.entries(defaults).forEach(([id, val]) => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.value = val;
-      const valId = "val" + id.replace("slide", "");
-      const span = document.getElementById(valId);
-      if (span) span.textContent = val;
-    }
-  });
+  setSliderValues({});
 
   const procImg = document.getElementById("modalProcessedImg");
   if (procImg) procImg.style.filter = "none";
 
   if (triggerUpdate && state.activeInspectorPhoto) {
-    if (procImg) {
-      procImg.src = state.activeInspectorPhoto.output_url
-        ? `${state.activeInspectorPhoto.output_url}?t=${state.activeInspectorPhoto.cacheBuster || Date.now()}`
-        : state.activeInspectorPhoto.input_url;
-    }
+    updatePreview(false);
   }
 }
 
@@ -1184,6 +1198,14 @@ async function saveCustomAdjustments() {
     const data = await res.json();
     if (data.status === "saved") {
       showToast(`Saved overrides: ${data.output_filename}`, "success");
+      // Update in-memory photo state with saved adjustment parameters
+      if (state.activeInspectorPhoto) {
+        state.activeInspectorPhoto.adjustments = data.adjustments || payload;
+      }
+      const p = state.photos.find((x) => x.filename === payload.filename);
+      if (p) {
+        p.adjustments = data.adjustments || payload;
+      }
       closeInspector();
       loadPhotos();
     }
