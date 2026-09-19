@@ -942,27 +942,101 @@ window.openInspectorByName = function(filename) {
   openInspector(photo);
 };
 
+let inspectorClosing = false;
+let livePreviewDebounceTimer = null;
+
 window.openInspector = function(photo) {
   state.activeInspectorPhoto = photo;
 
-  document.getElementById("modalFilename").textContent = photo.filename;
-  document.getElementById("modalOriginalImg").src = photo.input_url;
-  document.getElementById("modalProcessedImg").src = photo.output_url || photo.input_url;
+  const filenameEl = document.getElementById("modalFilename");
+  const origImg = document.getElementById("modalOriginalImg");
+  const procImg = document.getElementById("modalProcessedImg");
+  const modal = document.getElementById("inspectorModal");
+  const backdrop = document.getElementById("inspectorBackdrop");
+  const card = document.getElementById("inspectorCard");
 
-  // Reset sliders
+  if (filenameEl) filenameEl.textContent = photo.filename;
+  if (origImg) origImg.src = photo.input_url;
+  if (procImg) {
+    procImg.src = photo.output_url || photo.input_url;
+    procImg.style.filter = "none";
+  }
+
+  // Reset sliders without trigger
   resetSliders(false);
 
-  // Show Modal
-  const modal = document.getElementById("inspectorModal");
+  if (!modal || !backdrop || !card) return;
+
+  inspectorClosing = false;
   modal.classList.remove("hidden");
+  void modal.offsetHeight; // Force layout reflow
+
+  requestAnimationFrame(() => {
+    backdrop.classList.remove("opacity-0");
+    backdrop.classList.add("opacity-100");
+
+    card.classList.remove("opacity-0", "translate-y-8", "scale-[0.96]");
+    card.classList.add("opacity-100", "translate-y-0", "scale-100");
+  });
+
+  // Reset split slider to 50%
+  updateSplitPosition(50);
+
   if (window.lucide) lucide.createIcons();
 };
 
 window.closeInspector = function() {
+  if (inspectorClosing) return;
   const modal = document.getElementById("inspectorModal");
-  if (modal) modal.classList.add("hidden");
-  state.activeInspectorPhoto = null;
+  const backdrop = document.getElementById("inspectorBackdrop");
+  const card = document.getElementById("inspectorCard");
+  if (!modal || !backdrop || !card) return;
+
+  inspectorClosing = true;
+  backdrop.classList.remove("opacity-100");
+  backdrop.classList.add("opacity-0");
+
+  card.classList.remove("opacity-100", "translate-y-0", "scale-100");
+  card.classList.add("opacity-0", "translate-y-6", "scale-[0.96]");
+
+  setTimeout(() => {
+    if (inspectorClosing) {
+      modal.classList.add("hidden");
+      inspectorClosing = false;
+      state.activeInspectorPhoto = null;
+    }
+  }, 450);
 };
+
+// Real-Time Live Preview Engine
+function applyLiveCssPreview() {
+  const exp = parseFloat(document.getElementById("slideExposure")?.value || "0");
+  const contrast = parseFloat(document.getElementById("slideContrast")?.value || "0");
+  const temp = parseFloat(document.getElementById("slideTemp")?.value || "0");
+  const vibrance = parseFloat(document.getElementById("slideVibrance")?.value || "0");
+
+  const brightness = 1 + (exp * 0.35);
+  const contrastFactor = 1 + (contrast / 80);
+  const saturate = 1 + (vibrance / 60);
+  const hueRotate = temp * 0.25;
+
+  const img = document.getElementById("modalProcessedImg");
+  if (img) {
+    img.style.filter = `brightness(${brightness}) contrast(${contrastFactor}) saturate(${saturate}) hue-rotate(${hueRotate}deg)`;
+  }
+}
+
+function triggerLivePreview() {
+  applyLiveCssPreview();
+
+  if (livePreviewDebounceTimer) {
+    clearTimeout(livePreviewDebounceTimer);
+  }
+
+  livePreviewDebounceTimer = setTimeout(() => {
+    updatePreview(false);
+  }, 160);
+}
 
 function initSliderValueTrackers() {
   const map = {
@@ -978,9 +1052,20 @@ function initSliderValueTrackers() {
   Object.entries(map).forEach(([sliderId, valId]) => {
     const slider = document.getElementById(sliderId);
     const valSpan = document.getElementById(valId);
-    if (slider && valSpan) {
+    if (slider) {
       slider.addEventListener("input", (e) => {
-        valSpan.textContent = e.target.value;
+        if (valSpan) valSpan.textContent = e.target.value;
+        triggerLivePreview();
+      });
+    }
+  });
+
+  // Also listen on crop sliders
+  ["slideCropTop", "slideCropBottom"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener("input", () => {
+        triggerLivePreview();
       });
     }
   });
@@ -1003,35 +1088,44 @@ function resetSliders(triggerUpdate = true) {
     const el = document.getElementById(id);
     if (el) {
       el.value = val;
-      el.dispatchEvent(new Event("input"));
+      const valId = "val" + id.replace("slide", "");
+      const span = document.getElementById(valId);
+      if (span) span.textContent = val;
     }
   });
 
+  const procImg = document.getElementById("modalProcessedImg");
+  if (procImg) procImg.style.filter = "none";
+
   if (triggerUpdate && state.activeInspectorPhoto) {
-    document.getElementById("modalProcessedImg").src = state.activeInspectorPhoto.output_url || state.activeInspectorPhoto.input_url;
+    if (procImg) {
+      procImg.src = state.activeInspectorPhoto.output_url || state.activeInspectorPhoto.input_url;
+    }
   }
 }
 
-async function updatePreview() {
+async function updatePreview(showButtonLoader = true) {
   if (!state.activeInspectorPhoto) return;
 
   const payload = {
     filename: state.activeInspectorPhoto.filename,
-    exposure: parseFloat(document.getElementById("slideExposure").value),
-    contrast: parseFloat(document.getElementById("slideContrast").value),
-    shadows: parseFloat(document.getElementById("slideShadows").value),
-    highlights: parseFloat(document.getElementById("slideHighlights").value),
-    temperature: parseFloat(document.getElementById("slideTemp").value),
-    vibrance: parseFloat(document.getElementById("slideVibrance").value),
-    clarity: parseFloat(document.getElementById("slideClarity").value),
-    crop_top: parseFloat(document.getElementById("slideCropTop").value),
-    crop_bottom: parseFloat(document.getElementById("slideCropBottom").value),
+    exposure: parseFloat(document.getElementById("slideExposure")?.value || "0"),
+    contrast: parseFloat(document.getElementById("slideContrast")?.value || "0"),
+    shadows: parseFloat(document.getElementById("slideShadows")?.value || "0"),
+    highlights: parseFloat(document.getElementById("slideHighlights")?.value || "0"),
+    temperature: parseFloat(document.getElementById("slideTemp")?.value || "0"),
+    vibrance: parseFloat(document.getElementById("slideVibrance")?.value || "0"),
+    clarity: parseFloat(document.getElementById("slideClarity")?.value || "0"),
+    crop_top: parseFloat(document.getElementById("slideCropTop")?.value || "0"),
+    crop_bottom: parseFloat(document.getElementById("slideCropBottom")?.value || "0"),
   };
 
+  const btn = document.getElementById("btnApplyPreview");
   try {
-    const btn = document.getElementById("btnApplyPreview");
-    btn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Rendering...`;
-    if (window.lucide) lucide.createIcons();
+    if (showButtonLoader && btn) {
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Rendering...`;
+      if (window.lucide) lucide.createIcons();
+    }
 
     const res = await fetch("/api/adjust/preview", {
       method: "POST",
@@ -1041,13 +1135,19 @@ async function updatePreview() {
 
     const data = await res.json();
     if (data.status === "ok") {
-      document.getElementById("modalProcessedImg").src = data.preview_data_url;
+      const procImg = document.getElementById("modalProcessedImg");
+      if (procImg) {
+        procImg.src = data.preview_data_url;
+        procImg.style.filter = "none"; // Clear temporary CSS filter once rendered
+      }
     }
 
-    btn.innerHTML = `<i data-lucide="wand-2" class="w-3.5 h-3.5 text-[#FF385C]"></i> Update Preview`;
-    if (window.lucide) lucide.createIcons();
+    if (showButtonLoader && btn) {
+      btn.innerHTML = `<i data-lucide="wand-2" class="w-3.5 h-3.5 text-[#FF385C]"></i> Update Preview`;
+      if (window.lucide) lucide.createIcons();
+    }
   } catch (err) {
-    showToast("Preview failed: " + err, "error");
+    console.error("Preview failed:", err);
   }
 }
 
@@ -1056,15 +1156,15 @@ async function saveCustomAdjustments() {
 
   const payload = {
     filename: state.activeInspectorPhoto.filename,
-    exposure: parseFloat(document.getElementById("slideExposure").value),
-    contrast: parseFloat(document.getElementById("slideContrast").value),
-    shadows: parseFloat(document.getElementById("slideShadows").value),
-    highlights: parseFloat(document.getElementById("slideHighlights").value),
-    temperature: parseFloat(document.getElementById("slideTemp").value),
-    vibrance: parseFloat(document.getElementById("slideVibrance").value),
-    clarity: parseFloat(document.getElementById("slideClarity").value),
-    crop_top: parseFloat(document.getElementById("slideCropTop").value),
-    crop_bottom: parseFloat(document.getElementById("slideCropBottom").value),
+    exposure: parseFloat(document.getElementById("slideExposure")?.value || "0"),
+    contrast: parseFloat(document.getElementById("slideContrast")?.value || "0"),
+    shadows: parseFloat(document.getElementById("slideShadows")?.value || "0"),
+    highlights: parseFloat(document.getElementById("slideHighlights")?.value || "0"),
+    temperature: parseFloat(document.getElementById("slideTemp")?.value || "0"),
+    vibrance: parseFloat(document.getElementById("slideVibrance")?.value || "0"),
+    clarity: parseFloat(document.getElementById("slideClarity")?.value || "0"),
+    crop_top: parseFloat(document.getElementById("slideCropTop")?.value || "0"),
+    crop_bottom: parseFloat(document.getElementById("slideCropBottom")?.value || "0"),
   };
 
   try {
@@ -1076,22 +1176,28 @@ async function saveCustomAdjustments() {
 
     const data = await res.json();
     if (data.status === "saved") {
-      showToast(`Saved: ${data.output_filename}`, "success");
+      showToast(`Saved overrides: ${data.output_filename}`, "success");
       closeInspector();
       loadPhotos();
     }
   } catch (err) {
-    showToast("Save error!", "error");
+    showToast("Save error: " + err, "error");
   }
 }
 
 // ================= SPLIT SLIDER COMPARISON =================
 
+function updateSplitPosition(pct) {
+  pct = Math.max(0, Math.min(100, pct));
+  const clip = document.getElementById("modalBeforeClip");
+  const line = document.getElementById("modalDividerLine");
+  if (clip) clip.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
+  if (line) line.style.left = `${pct}%`;
+}
+
 function initSplitSlider() {
   const container = document.getElementById("splitViewerContainer");
-  const clip = document.getElementById("modalBeforeClip");
-  const handle = document.getElementById("modalSliderHandle");
-  if (!container || !clip || !handle) return;
+  if (!container) return;
   let isDragging = false;
 
   function move(e) {
@@ -1099,19 +1205,23 @@ function initSplitSlider() {
     const rect = container.getBoundingClientRect();
     const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
     const x = clientX - rect.left;
-    const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
-
-    clip.style.width = `${pct}%`;
-    handle.style.left = `${pct}%`;
+    const pct = (x / rect.width) * 100;
+    updateSplitPosition(pct);
   }
 
-  container.addEventListener("mousedown", () => (isDragging = true));
+  container.addEventListener("mousedown", (e) => {
+    isDragging = true;
+    move(e);
+  });
   window.addEventListener("mouseup", () => (isDragging = false));
   window.addEventListener("mousemove", move);
 
-  container.addEventListener("touchstart", () => (isDragging = true));
+  container.addEventListener("touchstart", (e) => {
+    isDragging = true;
+    move(e);
+  }, { passive: true });
   window.addEventListener("touchend", () => (isDragging = false));
-  window.addEventListener("touchmove", move);
+  window.addEventListener("touchmove", move, { passive: true });
 }
 
 // ================= DNG / LUT DRAG & DROP =================

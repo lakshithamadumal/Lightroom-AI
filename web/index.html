@@ -559,8 +559,12 @@
 
 
   <!-- ================= 6. AIRBNB MODAL: SINGLE PHOTO INSPECTOR & SLIDERS ================= -->
-  <div id="inspectorModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 sm:p-6 bg-black/50 backdrop-blur-sm">
-    <div class="bg-white max-w-5xl w-full max-h-[92vh] rounded-3xl border border-[#DDDDDD] shadow-airbnb-modal flex flex-col overflow-hidden animate-in fade-in duration-200">
+  <div id="inspectorModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true">
+    <!-- Smooth Airbnb Backdrop -->
+    <div id="inspectorBackdrop" onclick="closeInspector()" class="fixed inset-0 bg-black/60 backdrop-blur-sm opacity-0 transition-opacity duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"></div>
+
+    <!-- Smooth Airbnb Modal Card (Gentle bottom slide & scale) -->
+    <div id="inspectorCard" class="relative bg-white max-w-5xl w-full max-h-[92vh] rounded-3xl border border-[#DDDDDD] shadow-airbnb-modal flex flex-col overflow-hidden opacity-0 translate-y-8 scale-[0.96] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]">
       
       <!-- Modal Header -->
       <div class="px-6 py-4 border-b border-[#EBEBEB] flex items-center justify-between">
@@ -569,8 +573,11 @@
             <i data-lucide="x" class="w-5 h-5"></i>
           </button>
           <div>
-            <h3 id="modalFilename" class="text-sm font-bold text-[#222222] font-mono">_DSC4996.jpg</h3>
-            <p class="text-xs text-[#717171]">Interactive Before / After Split Slider & Manual Tuning</p>
+            <div class="flex items-center gap-2">
+              <h3 id="modalFilename" class="text-sm font-bold text-[#222222] font-mono">_DSC4996.jpg</h3>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-[#FF385C] border border-rose-100">Smart Fine-Tune</span>
+            </div>
+            <p class="text-xs text-[#717171]">Interactive Before / After Split Slider & Live Real-Time Tuning</p>
           </div>
         </div>
         <button id="btnModalSave" class="px-6 py-2.5 rounded-full bg-[#FF385C] hover:bg-[#E00B41] text-white text-xs font-bold transition-all shadow-sm flex items-center gap-2">
@@ -583,22 +590,28 @@
         
         <!-- Left 7 Cols: Split Comparison Slider -->
         <div class="lg:col-span-7 bg-[#0A0A0A] p-6 flex flex-col items-center justify-center relative select-none">
-          <div id="splitViewerContainer" class="compare-container w-full max-w-xl aspect-[3/2] rounded-2xl shadow-2xl overflow-hidden border border-[#222222] relative cursor-ew-resize">
-            <img id="modalProcessedImg" src="" alt="After" class="w-full h-full object-contain bg-black pointer-events-none" />
-            
-            <div id="modalBeforeClip" class="compare-overlay w-1/2 border-r-2 border-white shadow-[0_0_20px_rgba(255,255,255,0.8)]">
-              <img id="modalOriginalImg" src="" alt="Before" class="w-full h-full object-contain bg-black pointer-events-none max-w-none" />
-              <span class="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/70 text-[10px] font-bold text-white uppercase backdrop-blur-md">
-                Before
-              </span>
+          <div id="splitViewerContainer" class="relative w-full h-[460px] max-h-[58vh] bg-[#111111] rounded-2xl overflow-hidden shadow-2xl border border-[#222222] select-none cursor-ew-resize">
+            <!-- Bottom Layer: After AI Processed Image -->
+            <img id="modalProcessedImg" src="" alt="After" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
+
+            <!-- Top Layer: Before Original Image with Clip Path -->
+            <div id="modalBeforeClip" class="absolute inset-0 w-full h-full pointer-events-none overflow-hidden" style="clip-path: inset(0 50% 0 0);">
+              <img id="modalOriginalImg" src="" alt="Before" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
             </div>
 
-            <span class="absolute top-3 right-3 px-3 py-1 rounded-full bg-[#FF385C] text-[10px] font-bold text-white uppercase backdrop-blur-md">
+            <!-- Floating Badges -->
+            <span class="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/75 text-[10px] font-bold text-white uppercase backdrop-blur-md pointer-events-none z-10 border border-white/10">
+              Before
+            </span>
+            <span class="absolute top-3 right-3 px-3 py-1 rounded-full bg-[#FF385C] text-[10px] font-bold text-white uppercase backdrop-blur-md pointer-events-none z-10 shadow-xs">
               After AI
             </span>
 
-            <div id="modalSliderHandle" class="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full bg-white text-[#222222] shadow-xl flex items-center justify-center pointer-events-none">
-              <i data-lucide="chevrons-left-right" class="w-4 h-4"></i>
+            <!-- Divider Line & Circular Handle -->
+            <div id="modalDividerLine" class="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-[2px] bg-white shadow-[0_0_12px_rgba(255,255,255,0.9)] pointer-events-none z-20">
+              <div id="modalSliderHandle" class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 left-1/2 w-8 h-8 rounded-full bg-white text-[#222222] shadow-airbnb-modal flex items-center justify-center pointer-events-none border border-[#EBEBEB]">
+                <i data-lucide="chevrons-left-right" class="w-4 h-4"></i>
+              </div>
             </div>
           </div>
           <p class="text-xs text-gray-400 mt-3 flex items-center gap-1.5">
