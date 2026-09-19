@@ -810,6 +810,7 @@ async function startPipeline() {
     state.eventSource = null;
     state.isProcessing = false;
     setPipelineButtonMode("start");
+    showToast("Processing connection interrupted.", "error");
     loadPhotos();
   };
 }

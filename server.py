@@ -234,9 +234,13 @@ def api_validate():
 def api_list_presets():
     cfg = get_config()
     preset_dir = cfg["PRESET_FOLDER"]
-    os.makedirs(preset_dir, exist_ok=True)
     
-    files = [f for f in os.listdir(preset_dir) if f.lower().endswith(('.dng', '.xmp'))]
+    files = []
+    if os.path.isdir(preset_dir):
+        files = [f for f in os.listdir(preset_dir) if f.lower().endswith(('.dng', '.xmp'))]
+    elif os.path.isfile(preset_dir):
+        files = [os.path.basename(preset_dir)]
+    
     preset_mgr = PresetManager(preset_folder=preset_dir)
 
     return {
@@ -250,10 +254,11 @@ def api_list_presets():
 @app.post("/api/presets/upload")
 async def api_upload_preset(file: UploadFile = File(...)):
     cfg = get_config()
-    preset_dir = cfg["PRESET_FOLDER"]
-    os.makedirs(preset_dir, exist_ok=True)
+    target_dir = os.path.dirname(preset_dir) if os.path.isfile(preset_dir) else preset_dir
+    if target_dir:
+        os.makedirs(target_dir, exist_ok=True)
 
-    dest_path = os.path.join(preset_dir, file.filename)
+    dest_path = os.path.join(target_dir, file.filename)
     with open(dest_path, "wb") as f:
         content = await file.read()
         f.write(content)
@@ -336,32 +341,43 @@ async def api_process_stream(request: Request):
 
     os.makedirs(input_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(preset_dir, exist_ok=True)
+    if not os.path.isfile(preset_dir) and preset_dir:
+        os.makedirs(preset_dir, exist_ok=True)
 
     valid_exts = ('.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG', '.dng', '.DNG')
-    files = [f for f in os.listdir(input_dir) if f.lower().endswith(valid_exts)]
+    files = [f for f in os.listdir(input_dir) if f.lower().endswith(valid_exts)] if os.path.isdir(input_dir) else []
 
     async def event_generator():
-        preset_files = [
-            f for f in os.listdir(preset_dir)
-            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.dng', '.xmp')) and f.lower() != 'neutral_lut.png'
-        ] if os.path.exists(preset_dir) else []
+        valid_preset_exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.dng', '.xmp')
+        preset_files = []
+        if os.path.isfile(preset_dir):
+            if preset_dir.lower().endswith(valid_preset_exts) and os.path.basename(preset_dir).lower() != 'neutral_lut.png':
+                preset_files = [os.path.basename(preset_dir)]
+        elif os.path.isdir(preset_dir):
+            preset_files = [
+                f for f in os.listdir(preset_dir)
+                if f.lower().endswith(valid_preset_exts) and f.lower() != 'neutral_lut.png'
+            ]
 
         if len(files) == 0:
             yield f"data: {json.dumps({'type': 'error', 'message': f'No photos found in Incoming folder: {input_dir}'})}\n\n"
             return
 
         if len(preset_files) == 0:
-            yield f"data: {json.dumps({'type': 'error', 'message': f'No 3D LUT or Preset file found in Presets folder: {preset_dir}'})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': f'No 3D LUT or Preset file found in Presets location: {preset_dir}'})}\n\n"
             return
 
         if len(preset_files) > 1:
             yield f"data: {json.dumps({'type': 'error', 'message': f'Multiple LUT files detected ({len(preset_files)} found). Only 1 active LUT is allowed.'})}\n\n"
             return
 
-        preset_mgr = PresetManager(preset_folder=preset_dir)
-        cropper = SmartCropper(api_key=cfg["ORCA_API_KEY"], api_url=cfg["ORCA_API_URL"], model=cfg["ORCA_MODEL"])
-        adjuster = AutoAdjuster(api_key=cfg["ORCA_API_KEY"], api_url=cfg["ORCA_API_URL"], model=cfg["ORCA_MODEL"])
+        try:
+            preset_mgr = PresetManager(preset_folder=preset_dir)
+            cropper = SmartCropper(api_key=cfg["ORCA_API_KEY"], api_url=cfg["ORCA_API_URL"], model=cfg["ORCA_MODEL"])
+            adjuster = AutoAdjuster(api_key=cfg["ORCA_API_KEY"], api_url=cfg["ORCA_API_URL"], model=cfg["ORCA_MODEL"])
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to initialize AI Engine: {str(e)}'})}\n\n"
+            return
 
         yield f"data: {json.dumps({'type': 'init', 'total': len(files), 'preset': preset_mgr.preset_name, 'preset_summary': preset_mgr.get_summary_text()})}\n\n"
         await asyncio.sleep(0.05)
@@ -371,62 +387,66 @@ async def api_process_stream(request: Request):
                 print(f"   > [SSE] Aborted at photo {idx}/{len(files)}: client disconnected.")
                 break
 
-            yield f"data: {json.dumps({'type': 'photo_start', 'index': idx, 'total': len(files), 'filename': filename})}\n\n"
-            await asyncio.sleep(0.05)
-
-            img_path = os.path.join(input_dir, filename)
-            img = cv2.imread(img_path)
-
-            if img is None:
-                yield f"data: {json.dumps({'type': 'photo_error', 'index': idx, 'filename': filename, 'error': 'Could not decode image'})}\n\n"
-                continue
-
-            h, w = img.shape[:2]
-
-            # Step 1: Preset Color Grading
-            yield f"data: {json.dumps({'type': 'step_preset', 'index': idx, 'filename': filename})}\n\n"
-            preset_applied = preset_mgr.apply_preset(img)
-            await asyncio.sleep(0.05)
-
-            # Step 2: Per-Photo Dynamic Adjustment
-            yield f"data: {json.dumps({'type': 'step_adjust', 'index': idx, 'filename': filename})}\n\n"
-            if cfg["ENABLE_AUTO_BALANCING"]:
-                adjusted, telemetry = adjuster.fine_tune(preset_applied)
-            else:
-                adjusted = preset_applied
-                telemetry = {"exp_shift_ev": 0.0, "shadow_lift_pct": 0, "highlight_comp_pct": 0, "wb_status": "Manual"}
-            await asyncio.sleep(0.05)
-
-            # Step 3: Smart Landscape AI Cropping
-            if cfg["ENABLE_AI_SMART_CROP"]:
-                yield f"data: {json.dumps({'type': 'step_crop', 'index': idx, 'filename': filename})}\n\n"
-                cropped, crop_telemetry = cropper.crop_best_landscape(adjusted, enable_ai=True)
+            try:
+                yield f"data: {json.dumps({'type': 'photo_start', 'index': idx, 'total': len(files), 'filename': filename})}\n\n"
                 await asyncio.sleep(0.05)
-            else:
-                cropped = adjusted
-                crop_telemetry = {"method": "Original (No Crop)", "trim_x_pct": 0, "trim_y_pct": 0, "notes": "AI Crop disabled in settings"}
 
-            # Step 4: Scale to High-Res Master & Export (Preserves 100% Full Resolution if TARGET_MAX_WIDTH is 0)
-            ch, cw = cropped.shape[:2]
-            target_w = int(cfg.get("TARGET_MAX_WIDTH", 0))
-            if target_w > 0 and cw > target_w:
-                new_w = target_w
-                new_h = int(ch * (target_w / cw))
-                final_img = cv2.resize(cropped, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-            else:
-                final_img = cropped
+                img_path = os.path.join(input_dir, filename)
+                img = cv2.imread(img_path)
 
-            jpeg_quality = int(cfg.get("JPEG_QUALITY", 100))
-            base_name, _ = os.path.splitext(filename)
-            out_filename = f"{base_name}.jpg"
-            out_path = os.path.join(output_dir, out_filename)
-            cv2.imwrite(out_path, final_img, [
-                int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality,
-                int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
-            ])
+                if img is None:
+                    yield f"data: {json.dumps({'type': 'photo_error', 'index': idx, 'filename': filename, 'error': 'Could not decode image'})}\n\n"
+                    continue
 
-            yield f"data: {json.dumps({'type': 'photo_done', 'index': idx, 'total': len(files), 'filename': filename, 'output_filename': out_filename, 'input_url': f'/api/image/incoming/{urllib.parse.quote(filename)}', 'output_url': f'/api/image/output/{urllib.parse.quote(out_filename)}', 'dimensions': f'{final_img.shape[1]}x{final_img.shape[0]}', 'adjust_telemetry': telemetry, 'crop_telemetry': crop_telemetry})}\n\n"
-            await asyncio.sleep(0.1)
+                h, w = img.shape[:2]
+
+                # Step 1: Preset Color Grading
+                yield f"data: {json.dumps({'type': 'step_preset', 'index': idx, 'filename': filename})}\n\n"
+                preset_applied = preset_mgr.apply_preset(img)
+                await asyncio.sleep(0.05)
+
+                # Step 2: Per-Photo Dynamic Adjustment
+                yield f"data: {json.dumps({'type': 'step_adjust', 'index': idx, 'filename': filename})}\n\n"
+                if cfg["ENABLE_AUTO_BALANCING"]:
+                    adjusted, telemetry = adjuster.fine_tune(preset_applied)
+                else:
+                    adjusted = preset_applied
+                    telemetry = {"exp_shift_ev": 0.0, "shadow_lift_pct": 0, "highlight_comp_pct": 0, "wb_status": "Manual"}
+                await asyncio.sleep(0.05)
+
+                # Step 3: Smart Landscape AI Cropping
+                if cfg["ENABLE_AI_SMART_CROP"]:
+                    yield f"data: {json.dumps({'type': 'step_crop', 'index': idx, 'filename': filename})}\n\n"
+                    cropped, crop_telemetry = cropper.crop_best_landscape(adjusted, enable_ai=True)
+                    await asyncio.sleep(0.05)
+                else:
+                    cropped = adjusted
+                    crop_telemetry = {"method": "Original (No Crop)", "trim_x_pct": 0, "trim_y_pct": 0, "notes": "AI Crop disabled in settings"}
+
+                # Step 4: Scale to High-Res Master & Export (Preserves 100% Full Resolution if TARGET_MAX_WIDTH is 0)
+                ch, cw = cropped.shape[:2]
+                target_w = int(cfg.get("TARGET_MAX_WIDTH", 0))
+                if target_w > 0 and cw > target_w:
+                    new_w = target_w
+                    new_h = int(ch * (target_w / cw))
+                    final_img = cv2.resize(cropped, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+                else:
+                    final_img = cropped
+
+                jpeg_quality = int(cfg.get("JPEG_QUALITY", 100))
+                base_name, _ = os.path.splitext(filename)
+                out_filename = f"{base_name}.jpg"
+                out_path = os.path.join(output_dir, out_filename)
+                cv2.imwrite(out_path, final_img, [
+                    int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality,
+                    int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
+                ])
+
+                yield f"data: {json.dumps({'type': 'photo_done', 'index': idx, 'total': len(files), 'filename': filename, 'output_filename': out_filename, 'input_url': f'/api/image/incoming/{urllib.parse.quote(filename)}', 'output_url': f'/api/image/output/{urllib.parse.quote(out_filename)}', 'dimensions': f'{final_img.shape[1]}x{final_img.shape[0]}', 'adjust_telemetry': telemetry, 'crop_telemetry': crop_telemetry})}\n\n"
+                await asyncio.sleep(0.1)
+            except Exception as photo_err:
+                print(f"   > [SSE Error on {filename}]: {photo_err}")
+                yield f"data: {json.dumps({'type': 'photo_error', 'index': idx, 'filename': filename, 'error': str(photo_err)})}\n\n"
 
         yield f"data: {json.dumps({'type': 'complete', 'total': len(files), 'processed': len(files)})}\n\n"
 
