@@ -184,6 +184,26 @@ def apply_adjustments(img: np.ndarray, req: AdjustRequest) -> np.ndarray:
     return img_out
 
 
+def safe_read_image(path: str) -> Optional[np.ndarray]:
+    """
+    Safely reads any image format (JPG, PNG with/without alpha, TIFF, etc.)
+    and guarantees a standard 3-channel 8-bit BGR numpy array.
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        img = cv2.imread(path, cv2.IMREAD_COLOR)
+        if img is not None:
+            if img.ndim == 2:
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            elif len(img.shape) == 3 and img.shape[2] == 4:
+                img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        return img
+    except Exception as e:
+        print(f"   > [IMAGE READ ERROR] {path}: {e}")
+        return None
+
+
 def _open_native_dialog(dialog_type: str, initial_dir: str):
     import tkinter as tk
     from tkinter import filedialog
@@ -296,17 +316,17 @@ def api_validate():
         errors.append("Presets folder / LUT file not found!")
     elif os.path.isfile(preset_dir):
         # Direct file path
-        if preset_dir.lower().endswith(valid_preset_exts) and os.path.basename(preset_dir).lower() != 'neutral_lut.png':
+        if preset_dir.lower().endswith(valid_preset_exts):
             preset_count = 1
             preset_files = [os.path.basename(preset_dir)]
         else:
-            errors.append("Selected file is not a valid 3D LUT or Preset!")
+            errors.append("Selected file is not a valid 3D LUT or Preset file!")
     else:
         # Directory
         try:
             preset_files = [
                 f for f in os.listdir(preset_dir)
-                if f.lower().endswith(valid_preset_exts) and f.lower() != 'neutral_lut.png'
+                if f.lower().endswith(valid_preset_exts)
             ]
             preset_count = len(preset_files)
             if preset_count == 0:
@@ -460,12 +480,12 @@ async def api_process_stream(request: Request):
         valid_preset_exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.dng', '.xmp')
         preset_files = []
         if os.path.isfile(preset_dir):
-            if preset_dir.lower().endswith(valid_preset_exts) and os.path.basename(preset_dir).lower() != 'neutral_lut.png':
+            if preset_dir.lower().endswith(valid_preset_exts):
                 preset_files = [os.path.basename(preset_dir)]
         elif os.path.isdir(preset_dir):
             preset_files = [
                 f for f in os.listdir(preset_dir)
-                if f.lower().endswith(valid_preset_exts) and f.lower() != 'neutral_lut.png'
+                if f.lower().endswith(valid_preset_exts)
             ]
 
         if len(files) == 0:
@@ -501,7 +521,7 @@ async def api_process_stream(request: Request):
                 await asyncio.sleep(0.05)
 
                 img_path = os.path.join(input_dir, filename)
-                img = cv2.imread(img_path)
+                img = safe_read_image(img_path)
 
                 if img is None:
                     yield f"data: {json.dumps({'type': 'photo_error', 'index': idx, 'filename': filename, 'error': 'Could not decode image'})}\n\n"
@@ -606,11 +626,11 @@ def api_adjust_preview(req: AdjustRequest):
 
     # Always load from the clean base develop image (3D LUT preset applied)
     if os.path.exists(base_path):
-        img = cv2.imread(base_path)
+        img = safe_read_image(base_path)
     elif os.path.exists(out_path):
-        img = cv2.imread(out_path)
+        img = safe_read_image(out_path)
     elif os.path.exists(input_path):
-        raw_img = cv2.imread(input_path)
+        raw_img = safe_read_image(input_path)
         if raw_img is None:
             raise HTTPException(status_code=400, detail="Cannot read image")
         preset_mgr = PresetManager(preset_folder=cfg["PRESET_FOLDER"])
@@ -658,11 +678,13 @@ def api_adjust_save(req: AdjustRequest):
 
     # Load from clean base develop image (3D LUT preset applied)
     if os.path.exists(base_path):
-        img = cv2.imread(base_path)
+        img = safe_read_image(base_path)
     elif os.path.exists(out_path):
-        img = cv2.imread(out_path)
+        img = safe_read_image(out_path)
     elif os.path.exists(input_path):
-        raw_img = cv2.imread(input_path)
+        raw_img = safe_read_image(input_path)
+        if raw_img is None:
+            raise HTTPException(status_code=400, detail="Cannot read image")
         preset_mgr = PresetManager(preset_folder=cfg["PRESET_FOLDER"])
         img = preset_mgr.apply_preset(raw_img)
         cv2.imwrite(base_path, img)

@@ -27,6 +27,13 @@ class AutoAdjuster:
         Analyzes lighting balance and returns calculated adjustment parameters dict:
         { 'exposure': exp_shift, 'shadows': shadow_lift, 'highlights': -hl_comp, ... }
         """
+        if image_bgr is None:
+            return DEFAULT_ADJUSTMENTS.copy() if 'DEFAULT_ADJUSTMENTS' in globals() else {}
+        if image_bgr.ndim == 2:
+            image_bgr = cv2.cvtColor(image_bgr, cv2.COLOR_GRAY2BGR)
+        elif len(image_bgr.shape) == 3 and image_bgr.shape[2] == 4:
+            image_bgr = cv2.cvtColor(image_bgr, cv2.COLOR_BGRA2BGR)
+
         lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB)
         l_channel, _, _ = cv2.split(lab)
         current_median = float(np.median(l_channel))
@@ -83,6 +90,13 @@ class AutoAdjuster:
         """
         Applies style-preserving luminance adjustments and returns (adjusted_img, telemetry).
         """
+        if image_bgr is None:
+            return None, {}
+        if image_bgr.ndim == 2:
+            image_bgr = cv2.cvtColor(image_bgr, cv2.COLOR_GRAY2BGR)
+        elif len(image_bgr.shape) == 3 and image_bgr.shape[2] == 4:
+            image_bgr = cv2.cvtColor(image_bgr, cv2.COLOR_BGRA2BGR)
+
         h, w = image_bgr.shape[:2]
         
         # 1. Measure incoming Luminance in LAB space

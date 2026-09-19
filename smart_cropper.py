@@ -27,6 +27,13 @@ class SmartCropper:
         self.face_cascade = cv2.CascadeClassifier(cascade_path) if os.path.exists(cascade_path) else None
 
     def crop_best_landscape(self, img, enable_ai=True):
+        if img is None:
+            return None, {}
+        if img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        elif len(img.shape) == 3 and img.shape[2] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+
         h, w = img.shape[:2]
 
         # 1. AI Vision Composition Analysis (OrcaRouter)

@@ -28,37 +28,51 @@ class PresetManager:
 
     def _load_hald_lut(self):
         """
-        Looks for preset_lut.* or any edited LUT file in PRESET_FOLDER (excluding neutral_lut.png).
-        Supports JPG, PNG, TIF and auto-rescales to 512x512 if Lightroom changed dimensions.
+        Looks for preset_lut.* or any edited 3D Hald LUT file in PRESET_FOLDER.
+        Supports PNG, JPG, TIF, auto-converts 4-channel RGBA to 3-channel BGR and rescales to 512x512.
         """
         if not os.path.exists(self.preset_folder):
             return None
         valid_exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
 
-        # Direct file path support
-        if os.path.isfile(self.preset_folder):
-            if self.preset_folder.lower().endswith(valid_exts) and os.path.basename(self.preset_folder).lower() != 'neutral_lut.png':
-                lut_img = cv2.imread(self.preset_folder)
+        def _safe_lut_load(file_path):
+            try:
+                lut_img = cv2.imread(file_path, cv2.IMREAD_COLOR)
                 if lut_img is not None:
+                    if lut_img.ndim == 2:
+                        lut_img = cv2.cvtColor(lut_img, cv2.COLOR_GRAY2BGR)
+                    elif len(lut_img.shape) == 3 and lut_img.shape[2] == 4:
+                        lut_img = cv2.cvtColor(lut_img, cv2.COLOR_BGRA2BGR)
                     if lut_img.shape[0] != 512 or lut_img.shape[1] != 512:
                         lut_img = cv2.resize(lut_img, (512, 512), interpolation=cv2.INTER_AREA)
+                    return lut_img
+            except Exception as e:
+                print(f"   > [3D LUT] Error loading {file_path}: {e}")
+            return None
+
+        # Direct file path support
+        if os.path.isfile(self.preset_folder):
+            if self.preset_folder.lower().endswith(valid_exts):
+                lut_img = _safe_lut_load(self.preset_folder)
+                if lut_img is not None:
                     self.preset_name = os.path.basename(self.preset_folder)
                     print(f"   > [3D LUT] Loaded 100% Adobe Lightroom Exact LUT File: {self.preset_name}")
                     return lut_img
             return None
 
-        files = [f for f in os.listdir(self.preset_folder) if f.lower().endswith(valid_exts) and f.lower() != 'neutral_lut.png']
-        
-        # Prioritize files with 'lut' or 'preset' in name
+        # Directory scanning
+        files = [f for f in os.listdir(self.preset_folder) if f.lower().endswith(valid_exts)]
+        if not files:
+            return None
+
+        # Prioritize files with 'lut', 'preset', or 'vivid' in name
         lut_files = [f for f in files if 'lut' in f.lower() or 'preset' in f.lower() or 'vivid' in f.lower()]
         target_files = lut_files if lut_files else files
 
         if target_files:
             lut_path = os.path.join(self.preset_folder, target_files[0])
-            lut_img = cv2.imread(lut_path)
+            lut_img = _safe_lut_load(lut_path)
             if lut_img is not None:
-                if lut_img.shape[0] != 512 or lut_img.shape[1] != 512:
-                    lut_img = cv2.resize(lut_img, (512, 512), interpolation=cv2.INTER_AREA)
                 self.preset_name = target_files[0]
                 print(f"   > [3D LUT] Loaded 100% Adobe Lightroom Exact LUT: {target_files[0]}")
                 return lut_img
@@ -185,6 +199,13 @@ class PresetManager:
         return params
 
     def apply_preset(self, img_bgr):
+        if img_bgr is None:
+            return None
+        if img_bgr.ndim == 2:
+            img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
+        elif len(img_bgr.shape) == 3 and img_bgr.shape[2] == 4:
+            img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_BGRA2BGR)
+
         # 1. If 100% Adobe Lightroom 3D LUT is available, apply exact LUT mapping!
         if self.lut_image is not None:
             return self._apply_hald_clut(img_bgr, self.lut_image)
