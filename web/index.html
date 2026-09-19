@@ -591,8 +591,12 @@
   </div>
 
   <!-- ================= 7. HOW IT WORKS & SETUP GUIDE MODAL ================= -->
-  <div id="howItWorksModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-sm">
-    <div class="bg-white max-w-3xl w-full max-h-[90vh] rounded-3xl border border-[#DDDDDD] shadow-airbnb-modal flex flex-col overflow-hidden animate-in fade-in duration-200">
+  <div id="howItWorksModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true">
+    <!-- Smooth Airbnb Backdrop -->
+    <div id="howItWorksBackdrop" onclick="closeHowItWorks()" class="fixed inset-0 bg-black/60 backdrop-blur-sm opacity-0 transition-opacity duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"></div>
+    
+    <!-- Smooth Airbnb Modal Card (Gentle bottom slide & scale) -->
+    <div id="howItWorksCard" class="relative bg-white max-w-3xl w-full max-h-[90vh] rounded-3xl border border-[#DDDDDD] shadow-airbnb-modal flex flex-col overflow-hidden opacity-0 translate-y-8 scale-[0.96] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]">
       
       <!-- Modal Header -->
       <div class="flex items-center justify-between px-8 py-5 border-b border-[#EBEBEB]">

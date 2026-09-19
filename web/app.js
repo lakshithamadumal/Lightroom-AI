@@ -156,18 +156,61 @@ window.toggleSettingsDrawer = function() {
   }
 };
 
+let howItWorksClosing = false;
 window.openHowItWorks = function() {
   const modal = document.getElementById("howItWorksModal");
-  if (modal) {
-    modal.classList.remove("hidden");
-    if (window.lucide) lucide.createIcons();
-  }
+  const backdrop = document.getElementById("howItWorksBackdrop");
+  const card = document.getElementById("howItWorksCard");
+  if (!modal || !backdrop || !card) return;
+
+  howItWorksClosing = false;
+  modal.classList.remove("hidden");
+  
+  // Force browser layout reflow before triggering transition
+  void modal.offsetHeight;
+
+  requestAnimationFrame(() => {
+    backdrop.classList.remove("opacity-0");
+    backdrop.classList.add("opacity-100");
+
+    card.classList.remove("opacity-0", "translate-y-8", "scale-[0.96]");
+    card.classList.add("opacity-100", "translate-y-0", "scale-100");
+  });
+
+  if (window.lucide) lucide.createIcons();
 };
 
 window.closeHowItWorks = function() {
+  if (howItWorksClosing) return;
   const modal = document.getElementById("howItWorksModal");
-  if (modal) modal.classList.add("hidden");
+  const backdrop = document.getElementById("howItWorksBackdrop");
+  const card = document.getElementById("howItWorksCard");
+  if (!modal || !backdrop || !card) return;
+
+  howItWorksClosing = true;
+  backdrop.classList.remove("opacity-100");
+  backdrop.classList.add("opacity-0");
+
+  card.classList.remove("opacity-100", "translate-y-0", "scale-100");
+  card.classList.add("opacity-0", "translate-y-6", "scale-[0.96]");
+
+  setTimeout(() => {
+    if (howItWorksClosing) {
+      modal.classList.add("hidden");
+      howItWorksClosing = false;
+    }
+  }, 500);
 };
+
+// Close modal on Escape key press
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    const modal = document.getElementById("howItWorksModal");
+    if (modal && !modal.classList.contains("hidden")) {
+      window.closeHowItWorks();
+    }
+  }
+});
 
 // Native Folder / File Picker Dialogs
 window.browseFolder = async function(inputId) {
