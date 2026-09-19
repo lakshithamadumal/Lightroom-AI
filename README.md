@@ -123,7 +123,8 @@ Open your browser at: **`http://localhost:8000`**
 | `OUTPUT_FOLDER` | `C:/Media_Output` | Destination directory for master exports |
 | `ENABLE_AI_SMART_CROP` | `true` | Enables AI landscape composition cropping |
 | `ENABLE_AUTO_BALANCING`| `true` | Enables dynamic luminance auto-balancing |
-| `TARGET_MAX_WIDTH` | `1920` | Maximum pixel width for exported masters |
+| `TARGET_MAX_WIDTH` | `0` | Maximum pixel width (`0` = Full 100% Original Resolution) |
+| `JPEG_QUALITY` | `100` | Export JPEG Quality (`100` = Maximum Studio Quality / Full MB) |
 
 ---
 

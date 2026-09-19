@@ -299,12 +299,23 @@ async function loadConfig() {
     if (document.getElementById("toggleAutoBalancing")) {
       document.getElementById("toggleAutoBalancing").checked = data.ENABLE_AUTO_BALANCING !== false;
     }
+
+    // Export Resolution & Quality
+    if (document.getElementById("selectTargetWidth") && data.TARGET_MAX_WIDTH !== undefined) {
+      document.getElementById("selectTargetWidth").value = String(data.TARGET_MAX_WIDTH);
+    }
+    if (document.getElementById("selectJpegQuality") && data.JPEG_QUALITY !== undefined) {
+      document.getElementById("selectJpegQuality").value = String(data.JPEG_QUALITY);
+    }
   } catch (err) {
     console.error("Failed to load config:", err);
   }
 }
 
 async function saveConfig() {
+  const targetWidthEl = document.getElementById("selectTargetWidth");
+  const jpegQualityEl = document.getElementById("selectJpegQuality");
+
   const payload = {
     ORCA_API_KEY: document.getElementById("inputApiKey").value.trim(),
     ORCA_MODEL: document.getElementById("inputModel").value.trim(),
@@ -313,6 +324,8 @@ async function saveConfig() {
     PRESET_FOLDER: document.getElementById("inputFolderPresets").value.trim(),
     ENABLE_AI_SMART_CROP: document.getElementById("toggleAiCrop") ? document.getElementById("toggleAiCrop").checked : true,
     ENABLE_AUTO_BALANCING: document.getElementById("toggleAutoBalancing") ? document.getElementById("toggleAutoBalancing").checked : true,
+    TARGET_MAX_WIDTH: targetWidthEl ? parseInt(targetWidthEl.value, 10) : 0,
+    JPEG_QUALITY: jpegQualityEl ? parseInt(jpegQualityEl.value, 10) : 100,
   };
 
   try {

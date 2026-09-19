@@ -51,7 +51,8 @@ def get_config():
         "OUTPUT_FOLDER": os.getenv("OUTPUT_FOLDER", "C:/Media_Output"),
         "ENABLE_AI_SMART_CROP": os.getenv("ENABLE_AI_SMART_CROP", "true").lower() == "true",
         "ENABLE_AUTO_BALANCING": os.getenv("ENABLE_AUTO_BALANCING", "true").lower() == "true",
-        "TARGET_MAX_WIDTH": int(os.getenv("TARGET_MAX_WIDTH", "1920")),
+        "TARGET_MAX_WIDTH": int(os.getenv("TARGET_MAX_WIDTH", "0")),  # 0 = Full original resolution (no downscaling)
+        "JPEG_QUALITY": int(os.getenv("JPEG_QUALITY", "100")),        # 100 = Maximum uncompressed studio quality
     }
 
 
@@ -65,6 +66,7 @@ class ConfigUpdate(BaseModel):
     ENABLE_AI_SMART_CROP: Optional[bool] = None
     ENABLE_AUTO_BALANCING: Optional[bool] = None
     TARGET_MAX_WIDTH: Optional[int] = None
+    JPEG_QUALITY: Optional[int] = None
 
 
 class AdjustRequest(BaseModel):
@@ -404,20 +406,24 @@ async def api_process_stream(request: Request):
                 cropped = adjusted
                 crop_telemetry = {"method": "Original (No Crop)", "trim_x_pct": 0, "trim_y_pct": 0, "notes": "AI Crop disabled in settings"}
 
-            # Step 4: Scale to High-Res Master & Export
+            # Step 4: Scale to High-Res Master & Export (Preserves 100% Full Resolution if TARGET_MAX_WIDTH is 0)
             ch, cw = cropped.shape[:2]
-            target_w = cfg["TARGET_MAX_WIDTH"]
-            if cw > target_w:
+            target_w = int(cfg.get("TARGET_MAX_WIDTH", 0))
+            if target_w > 0 and cw > target_w:
                 new_w = target_w
                 new_h = int(ch * (target_w / cw))
                 final_img = cv2.resize(cropped, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
             else:
                 final_img = cropped
 
+            jpeg_quality = int(cfg.get("JPEG_QUALITY", 100))
             base_name, _ = os.path.splitext(filename)
             out_filename = f"{base_name}.jpg"
             out_path = os.path.join(output_dir, out_filename)
-            cv2.imwrite(out_path, final_img, [cv2.IMWRITE_JPEG_QUALITY, 96])
+            cv2.imwrite(out_path, final_img, [
+                int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality,
+                int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
+            ])
 
             yield f"data: {json.dumps({'type': 'photo_done', 'index': idx, 'total': len(files), 'filename': filename, 'output_filename': out_filename, 'input_url': f'/api/image/incoming/{urllib.parse.quote(filename)}', 'output_url': f'/api/image/output/{urllib.parse.quote(out_filename)}', 'dimensions': f'{final_img.shape[1]}x{final_img.shape[0]}', 'adjust_telemetry': telemetry, 'crop_telemetry': crop_telemetry})}\n\n"
             await asyncio.sleep(0.1)
@@ -572,16 +578,20 @@ def api_adjust_save(req: AdjustRequest):
     if (x2 - x1) > 100 and (y2 - y1) > 100:
         img_out = img_out[y1:y2, x1:x2]
 
-    # Resize to Master Width
-    target_w = cfg["TARGET_MAX_WIDTH"]
+    # Resize to Master Width (Preserves 100% Full Resolution if TARGET_MAX_WIDTH is 0)
+    target_w = int(cfg.get("TARGET_MAX_WIDTH", 0))
     ch, cw = img_out.shape[:2]
-    if cw > target_w:
+    if target_w > 0 and cw > target_w:
         img_out = cv2.resize(img_out, (target_w, int(ch * (target_w / cw))), interpolation=cv2.INTER_LANCZOS4)
 
+    jpeg_quality = int(cfg.get("JPEG_QUALITY", 100))
     base, _ = os.path.splitext(req.filename)
     out_filename = f"{base}.jpg"
     out_path = os.path.join(cfg["OUTPUT_FOLDER"], out_filename)
-    cv2.imwrite(out_path, img_out, [cv2.IMWRITE_JPEG_QUALITY, 96])
+    cv2.imwrite(out_path, img_out, [
+        int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality,
+        int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
+    ])
 
     return {
         "status": "saved",

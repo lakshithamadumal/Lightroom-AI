@@ -24,7 +24,8 @@ PRESET_FOLDER = os.getenv("PRESET_FOLDER", "D:/Media_Presets")
 
 ENABLE_AI_SMART_CROP = os.getenv("ENABLE_AI_SMART_CROP", "true").lower() == "true"
 ENABLE_AUTO_BALANCING = os.getenv("ENABLE_AUTO_BALANCING", "true").lower() == "true"
-TARGET_MAX_WIDTH = int(os.getenv("TARGET_MAX_WIDTH", "1920"))
+TARGET_MAX_WIDTH = int(os.getenv("TARGET_MAX_WIDTH", "0"))
+JPEG_QUALITY = int(os.getenv("JPEG_QUALITY", "100"))
 
 
 def process_images():
@@ -102,7 +103,7 @@ def process_images():
         # STEP 5: Resize to High Resolution Master & Save
         print(" [STEP 4: FINAL MASTER EXPORT]")
         ch, cw = cropped.shape[:2]
-        if cw > TARGET_MAX_WIDTH:
+        if TARGET_MAX_WIDTH > 0 and cw > TARGET_MAX_WIDTH:
             new_w = TARGET_MAX_WIDTH
             new_h = int(ch * (TARGET_MAX_WIDTH / cw))
             final_output = cv2.resize(cropped, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
@@ -112,7 +113,10 @@ def process_images():
         base_name, _ = os.path.splitext(filename)
         output_filename = f"{base_name}.jpg"
         output_path = os.path.join(OUTPUT_FOLDER, output_filename)
-        cv2.imwrite(output_path, final_output, [cv2.IMWRITE_JPEG_QUALITY, 96])
+        cv2.imwrite(output_path, final_output, [
+            int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY,
+            int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
+        ])
 
         processed_count += 1
         print(f"   > [SAVED] {output_path} ({final_output.shape[1]}x{final_output.shape[0]} px)")

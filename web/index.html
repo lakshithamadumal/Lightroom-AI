@@ -317,12 +317,13 @@
             </label>
           </div>
 
-          <!-- Auto Balancing Luminance Toggle -->
+          <!-- Auto Balancing Luminance Toggle (BETA) -->
           <div class="flex items-center justify-between p-4 rounded-2xl bg-[#F7F7F7] border border-[#EBEBEB] hover:border-[#DDDDDD] transition-all">
             <div class="flex flex-col pr-3">
               <div class="flex items-center gap-2">
                 <i data-lucide="sun-medium" class="w-4 h-4 text-[#FF385C]"></i>
                 <span class="text-xs font-bold text-[#222222]">Auto Balancing & Luminance</span>
+                <span class="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-rose-50 text-[#FF385C] border border-rose-200 shadow-2xs">BETA</span>
               </div>
               <span class="text-[11px] text-[#717171] mt-0.5">Style-preserving dynamic lighting calibration</span>
             </div>
@@ -332,9 +333,34 @@
             </label>
           </div>
 
-          <div class="p-3.5 rounded-xl bg-rose-50/60 border border-rose-100 text-[11px] text-[#717171] space-y-1">
-            <span class="font-bold text-[#FF385C] flex items-center gap-1"><i data-lucide="info" class="w-3.5 h-3.5"></i> Preset Engine Note</span>
-            <p>100% Adobe color grading applies first; toggles dynamically enhance lighting & framing per photo.</p>
+          <!-- Master Export Resolution & Quality Controls -->
+          <div class="p-4 rounded-2xl bg-[#F7F7F7] border border-[#EBEBEB] space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-[#222222] flex items-center gap-1.5">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-[#FF385C]"></i> Master Output Quality
+              </span>
+              <span class="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">100% Uncompressed</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2.5">
+              <div>
+                <label class="block text-[11px] font-bold text-[#717171] mb-1">Max Resolution</label>
+                <select id="selectTargetWidth" class="w-full bg-white border border-[#DDDDDD] rounded-xl px-2.5 py-2 text-xs text-[#222222] font-medium focus:outline-none focus:border-[#222222]">
+                  <option value="0" selected>Original (100% Full Res)</option>
+                  <option value="3840">4K Ultra HD (3840px)</option>
+                  <option value="2560">2K QHD (2560px)</option>
+                  <option value="1920">Full HD (1920px)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-[#717171] mb-1">JPEG Quality</label>
+                <select id="selectJpegQuality" class="w-full bg-white border border-[#DDDDDD] rounded-xl px-2.5 py-2 text-xs text-[#222222] font-medium focus:outline-none focus:border-[#222222]">
+                  <option value="100" selected>100% Studio Max (Full MB)</option>
+                  <option value="98">98% High Quality</option>
+                  <option value="95">95% Balanced</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
       </div>
