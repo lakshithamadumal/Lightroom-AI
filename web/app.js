@@ -90,35 +90,49 @@ function initEventListeners() {
   // Slider Input Values
   initSliderValueTrackers();
 
-  // Custom Model Dropdown
-  initCustomDropdown();
+  // Custom Dropdowns (Model, Resolution, Quality)
+  initCustomDropdowns();
 
   // Split Comparison Dragging in Modal
   initSplitSlider();
 }
 
-function initCustomDropdown() {
-  const trigger = document.getElementById("btnCustomModelTrigger");
-  const menu = document.getElementById("customModelMenu");
-  const chevron = document.getElementById("customModelChevron");
+function initCustomDropdowns() {
+  // Helper to bind toggle & outside click for any custom dropdown
+  function bindDropdown(triggerId, menuId, chevronId) {
+    const trigger = document.getElementById(triggerId);
+    const menu = document.getElementById(menuId);
+    const chevron = document.getElementById(chevronId);
+    if (!trigger || !menu) return;
 
-  if (!trigger || !menu) return;
+    trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const isHidden = menu.classList.contains("hidden");
+      // Close any other open dropdown menus first
+      document.querySelectorAll("#customModelMenu, #customResMenu, #customQualityMenu").forEach(m => {
+        if (m !== menu) m.classList.add("hidden");
+      });
+      document.querySelectorAll("#customModelChevron, #customResChevron, #customQualityChevron").forEach(c => {
+        if (c !== chevron) c.style.transform = "rotate(0deg)";
+      });
 
-  trigger.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const isHidden = menu.classList.contains("hidden");
-    menu.classList.toggle("hidden");
-    if (chevron) {
-      chevron.style.transform = isHidden ? "rotate(180deg)" : "rotate(0deg)";
-    }
-  });
+      menu.classList.toggle("hidden");
+      if (chevron) {
+        chevron.style.transform = isHidden ? "rotate(180deg)" : "rotate(0deg)";
+      }
+    });
 
-  document.addEventListener("click", (e) => {
-    if (!menu.contains(e.target) && !trigger.contains(e.target)) {
-      menu.classList.add("hidden");
-      if (chevron) chevron.style.transform = "rotate(0deg)";
-    }
-  });
+    document.addEventListener("click", (e) => {
+      if (!menu.contains(e.target) && !trigger.contains(e.target)) {
+        menu.classList.add("hidden");
+        if (chevron) chevron.style.transform = "rotate(0deg)";
+      }
+    });
+  }
+
+  bindDropdown("btnCustomModelTrigger", "customModelMenu", "customModelChevron");
+  bindDropdown("btnCustomResolutionTrigger", "customResMenu", "customResChevron");
+  bindDropdown("btnCustomQualityTrigger", "customQualityMenu", "customQualityChevron");
 }
 
 window.selectVisionModel = function(value, name, desc) {
@@ -138,6 +152,54 @@ window.selectVisionModel = function(value, name, desc) {
   document.querySelectorAll(".model-option").forEach((opt) => {
     const isMatch = opt.getAttribute("data-value") === value;
     const check = opt.querySelector(".model-check");
+    if (check) {
+      if (isMatch) check.classList.remove("hidden");
+      else check.classList.add("hidden");
+    }
+  });
+};
+
+window.selectResolution = function(value, name, desc) {
+  const input = document.getElementById("selectTargetWidth");
+  const nameEl = document.getElementById("customResSelectedName");
+  const descEl = document.getElementById("customResSelectedDesc");
+  const menu = document.getElementById("customResMenu");
+  const chevron = document.getElementById("customResChevron");
+
+  if (input) input.value = value;
+  if (nameEl) nameEl.textContent = name;
+  if (descEl) descEl.textContent = desc;
+  if (menu) menu.classList.add("hidden");
+  if (chevron) chevron.style.transform = "rotate(0deg)";
+
+  // Update checkmarks
+  document.querySelectorAll(".res-option").forEach((opt) => {
+    const isMatch = opt.getAttribute("data-value") === String(value);
+    const check = opt.querySelector(".res-check");
+    if (check) {
+      if (isMatch) check.classList.remove("hidden");
+      else check.classList.add("hidden");
+    }
+  });
+};
+
+window.selectQuality = function(value, name, desc) {
+  const input = document.getElementById("selectJpegQuality");
+  const nameEl = document.getElementById("customQualitySelectedName");
+  const descEl = document.getElementById("customQualitySelectedDesc");
+  const menu = document.getElementById("customQualityMenu");
+  const chevron = document.getElementById("customQualityChevron");
+
+  if (input) input.value = value;
+  if (nameEl) nameEl.textContent = name;
+  if (descEl) descEl.textContent = desc;
+  if (menu) menu.classList.add("hidden");
+  if (chevron) chevron.style.transform = "rotate(0deg)";
+
+  // Update checkmarks
+  document.querySelectorAll(".quality-option").forEach((opt) => {
+    const isMatch = opt.getAttribute("data-value") === String(value);
+    const check = opt.querySelector(".quality-check");
     if (check) {
       if (isMatch) check.classList.remove("hidden");
       else check.classList.add("hidden");
@@ -300,13 +362,25 @@ async function loadConfig() {
       document.getElementById("toggleAutoBalancing").checked = data.ENABLE_AUTO_BALANCING !== false;
     }
 
-    // Export Resolution & Quality
-    if (document.getElementById("selectTargetWidth") && data.TARGET_MAX_WIDTH !== undefined) {
-      document.getElementById("selectTargetWidth").value = String(data.TARGET_MAX_WIDTH);
-    }
-    if (document.getElementById("selectJpegQuality") && data.JPEG_QUALITY !== undefined) {
-      document.getElementById("selectJpegQuality").value = String(data.JPEG_QUALITY);
-    }
+    // Export Resolution & Quality Airbnb Dropdowns
+    const resMap = {
+      "0": { name: "Original (100% Full Res)", desc: "Full Camera Resolution" },
+      "3840": { name: "4K Ultra HD (3840px)", desc: "Ultra High-Res Screen Master" },
+      "2560": { name: "2K QHD (2560px)", desc: "Crisp 2K Display Ready" },
+      "1920": { name: "Full HD (1920px)", desc: "Standard 1080p Web Export" }
+    };
+    const targetW = String(data.TARGET_MAX_WIDTH !== undefined ? data.TARGET_MAX_WIDTH : "0");
+    const resInfo = resMap[targetW] || { name: `Custom (${targetW}px)`, desc: "Custom Target Resolution" };
+    selectResolution(targetW, resInfo.name, resInfo.desc);
+
+    const qualityMap = {
+      "100": { name: "100% Studio Max", desc: "Lossless Quality • Full MB" },
+      "98": { name: "98% High Quality", desc: "Near-Lossless High Detail" },
+      "95": { name: "95% Balanced", desc: "Standard Web Compression" }
+    };
+    const qualityVal = String(data.JPEG_QUALITY !== undefined ? data.JPEG_QUALITY : "100");
+    const qualInfo = qualityMap[qualityVal] || { name: `${qualityVal}% Quality`, desc: "Custom Export Quality" };
+    selectQuality(qualityVal, qualInfo.name, qualInfo.desc);
   } catch (err) {
     console.error("Failed to load config:", err);
   }
