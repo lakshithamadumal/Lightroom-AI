@@ -1175,6 +1175,14 @@ async function updatePreview(showButtonLoader = true) {
 async function saveCustomAdjustments() {
   if (!state.activeInspectorPhoto) return;
 
+  const btn = document.getElementById("btnModalSave");
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add("opacity-80", "cursor-not-allowed");
+    btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Saving...`;
+    if (window.lucide) lucide.createIcons();
+  }
+
   const payload = {
     filename: state.activeInspectorPhoto.filename,
     exposure: parseFloat(document.getElementById("slideExposure")?.value || "0"),
@@ -1208,9 +1216,18 @@ async function saveCustomAdjustments() {
       }
       closeInspector();
       loadPhotos();
+    } else {
+      showToast("Save failed", "error");
     }
   } catch (err) {
     showToast("Save error: " + err, "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("opacity-80", "cursor-not-allowed");
+      btn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Save Overrides`;
+      if (window.lucide) lucide.createIcons();
+    }
   }
 }
 
