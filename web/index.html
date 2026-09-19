@@ -96,10 +96,15 @@
   <header class="sticky top-0 z-40 bg-white border-b border-[#EBEBEB] transition-all">
     <div class="max-w-7xl mx-auto px-6 lg:px-10 h-20 flex items-center justify-between gap-4">
       
-      <!-- Brand Logo -->
-      <a href="/" class="flex items-center gap-2.5 group">
-        <img src="/logo.svg" alt="Lightroom AI" class="h-9 w-auto object-contain" onerror="this.onerror=null; this.src='/favicon.png';" />
-      </a>
+      <!-- Brand Logo & Version Badge -->
+      <div class="flex items-center gap-2.5">
+        <a href="/" class="flex items-center group">
+          <img src="/logo.svg" alt="Lightroom AI" class="h-9 w-auto object-contain" onerror="this.onerror=null; this.src='/favicon.png';" />
+        </a>
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold tracking-wider bg-[#F7F7F7] text-[#717171] border border-[#DDDDDD] shadow-2xs select-none">
+          v1.0.6
+        </span>
+      </div>
 
       <!-- Center: Airbnb Single Segment Capsule Pill with Elongated Start Button -->
       <div class="hidden md:flex items-center bg-white border border-[#DDDDDD] rounded-full pl-6 pr-2 py-1.5 shadow-airbnb-pill transition-all duration-200">
@@ -140,7 +145,10 @@
     <div class="bg-white rounded-3xl p-8 border border-[#DDDDDD] shadow-airbnb-card space-y-6">
       <div class="flex items-center justify-between pb-4 border-b border-[#EBEBEB]">
         <div>
-          <h2 class="text-lg font-extrabold text-[#222222]">Studio Settings & Workspace</h2>
+          <div class="flex items-center gap-2">
+            <h2 class="text-lg font-extrabold text-[#222222]">Studio Settings & Workspace</h2>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F7F7F7] text-[#717171] border border-[#DDDDDD]">v1.0.6</span>
+          </div>
           <p class="text-xs text-[#717171] mt-0.5">Configure OrcaRouter Vision AI, Folder Locations & 3D HALD Preset</p>
         </div>
         <button onclick="toggleSettingsDrawer()" class="p-2 rounded-full hover:bg-[#F7F7F7] text-[#717171]">
@@ -605,7 +613,10 @@
             <i data-lucide="help-circle" class="w-5 h-5"></i>
           </div>
           <div>
-            <h3 class="text-base font-extrabold text-[#222222]">How Lightroom AI Studio Works</h3>
+            <div class="flex items-center gap-2">
+              <h3 class="text-base font-extrabold text-[#222222]">How Lightroom AI Studio Works</h3>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F7F7F7] text-[#717171] border border-[#DDDDDD]">v1.0.6</span>
+            </div>
             <p class="text-xs text-[#717171] mt-0.5">Comprehensive Setup & 100% Adobe Lightroom Engine Guide</p>
           </div>
         </div>
