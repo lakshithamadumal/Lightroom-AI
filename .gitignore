@@ -3,3 +3,12 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+.base/
+.staging/
+temp_hald_upload/
+presets/test_preset_backup/
+.overrides.json
+.telemetry.json
+tmp_*
+
+
