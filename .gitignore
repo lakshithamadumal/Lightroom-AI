@@ -1,8 +1,21 @@
+# Environment / secrets
 .env
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-.DS_Store
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+
+# Application temporary & working files
 .base/
 .staging/
 temp_hald_upload/
@@ -10,5 +23,13 @@ presets/test_preset_backup/
 .overrides.json
 .telemetry.json
 tmp_*
+*.tmp
+*.log
 
+# IDE
+.vscode/
+.idea/
 
+# OS
+.DS_Store
+Thumbs.db

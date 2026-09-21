@@ -54,18 +54,48 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ENV_FILE_PATH = os.path.abspath(".env")
-WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
+def get_base_dir() -> str:
+    """Returns directory containing the application executable or source script."""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def get_resource_path(relative_path: str) -> str:
+    """Returns absolute path to a resource, supporting PyInstaller bundled directories and source."""
+    if getattr(sys, 'frozen', False):
+        if hasattr(sys, '_MEIPASS'):
+            candidate = os.path.join(sys._MEIPASS, relative_path)
+            if os.path.exists(candidate):
+                return candidate
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        candidate2 = os.path.join(exe_dir, relative_path)
+        if os.path.exists(candidate2):
+            return candidate2
+    base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, relative_path)
+
+
+ENV_FILE_PATH = os.path.join(get_base_dir(), ".env")
+WEB_DIR = get_resource_path("web")
 
 
 def get_config():
-    load_dotenv(override=True)
+    load_dotenv(dotenv_path=ENV_FILE_PATH, override=True)
+    base_dir = get_base_dir()
+    
+    preset_folder_val = os.getenv("PRESET_FOLDER", "calibration")
+    if not os.path.isabs(preset_folder_val):
+        resolved_preset = get_resource_path(preset_folder_val)
+        if os.path.exists(resolved_preset):
+            preset_folder_val = resolved_preset
+
     return {
         "ORCA_API_KEY": os.getenv("ORCA_API_KEY", ""),
         "ORCA_API_URL": os.getenv("ORCA_API_URL", "https://api.groq.com/openai/v1/chat/completions"),
         "ORCA_MODEL": os.getenv("ORCA_MODEL", "qwen/qwen3.8-27b"),
         "INPUT_FOLDER": os.getenv("INPUT_FOLDER", "C:/Media_Incoming"),
-        "PRESET_FOLDER": os.getenv("PRESET_FOLDER", "C:/Media_Presets"),
+        "PRESET_FOLDER": preset_folder_val,
         "OUTPUT_FOLDER": os.getenv("OUTPUT_FOLDER", "C:/Media_Output"),
         "ENABLE_AI_SMART_CROP": os.getenv("ENABLE_AI_SMART_CROP", "true").lower() == "true",
         "ENABLE_AUTO_BALANCING": os.getenv("ENABLE_AUTO_BALANCING", "true").lower() == "true",
@@ -643,6 +673,7 @@ async def api_process_stream(request: Request):
                     save_override_params(output_dir, filename, ai_adj)
                 else:
                     stage2_balanced = stage1_preset_base.copy()
+                    ai_adj = DEFAULT_ADJUSTMENTS.copy()
                     telemetry = {
                         "stage": 2,
                         "ai_status": "ai_disabled",
@@ -655,7 +686,7 @@ async def api_process_stream(request: Request):
                         "api_error": None,
                         "style_preservation": "Pristine Preset Base"
                     }
-                    save_override_params(output_dir, filename, DEFAULT_ADJUSTMENTS.copy())
+                    save_override_params(output_dir, filename, ai_adj)
                 await asyncio.sleep(0.05)
 
                 # ================= OPTIONAL SMART CROP (AFTER STAGE 2) =================
@@ -1069,10 +1100,25 @@ os.makedirs(WEB_DIR, exist_ok=True)
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="static")
 
 
+def _launch_browser():
+    import time
+    import webbrowser
+    time.sleep(1.2)
+    try:
+        webbrowser.open("http://localhost:8000")
+    except Exception as e:
+        print(f"   > [BROWSER LAUNCH NOTE]: {e}")
+
+
 if __name__ == "__main__":
     import uvicorn
+    import threading
+    threading.Thread(target=_launch_browser, daemon=True).start()
     print("\n=======================================================")
     print("🚀 Starting Lightroom AI Studio 2.0 Web Server...")
-    print("🌐 Open your browser at: http://localhost:8000")
+    print("🌐 Opening your browser at: http://localhost:8000")
     print("=======================================================\n")
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    if getattr(sys, 'frozen', False):
+        uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    else:
+        uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

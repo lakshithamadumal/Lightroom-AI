@@ -214,8 +214,20 @@ class PresetBundle:
         4. A single .xmp or .dng file
         """
         if not os.path.exists(target_path):
-            # Fallback default
-            return cls(preset_id="default_profile", name="Default Profile")
+            import sys
+            if getattr(sys, 'frozen', False):
+                if hasattr(sys, '_MEIPASS'):
+                    candidate = os.path.join(sys._MEIPASS, target_path)
+                    if os.path.exists(candidate):
+                        target_path = candidate
+                if not os.path.exists(target_path):
+                    exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+                    candidate2 = os.path.join(exe_dir, target_path)
+                    if os.path.exists(candidate2):
+                        target_path = candidate2
+            if not os.path.exists(target_path):
+                # Fallback default
+                return cls(preset_id="default_profile", name="Default Profile")
 
         if os.path.isdir(target_path):
             bundle = cls.load_from_directory(target_path)
