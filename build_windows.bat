@@ -23,6 +23,8 @@ set "TARGET_DIR=dist\Lightroom_AI_Studio_v2.0.0_Windows"
 if exist ".env.example" copy /y ".env.example" "%TARGET_DIR%\.env.example" >nul
 if exist "README.md" copy /y "README.md" "%TARGET_DIR%\README.md" >nul
 if exist "LICENSE" copy /y "LICENSE" "%TARGET_DIR%\LICENSE" >nul
+if not exist "%TARGET_DIR%\calibration" mkdir "%TARGET_DIR%\calibration"
+xcopy /s /y /i "calibration" "%TARGET_DIR%\calibration" >nul
 
 echo [4/5] Creating release ZIP archive...
 powershell -NoProfile -Command "Compress-Archive -Path '%TARGET_DIR%' -DestinationPath 'dist\Lightroom_AI_Studio_v2.0.0_Windows.zip' -Force"

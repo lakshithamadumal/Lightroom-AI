@@ -186,8 +186,8 @@
   ],
   "calibration_metadata": {
     "engine": "Lightroom AI Studio Calibration Engine 2.0",
-    "calibration_timestamp": "2026-09-21T08:31:38Z",
-    "source_reference_file": "photo_5_dark_shadow.jpg.jpeg",
+    "calibration_timestamp": "2026-10-09T05:26:57Z",
+    "source_reference_file": "neutral_lut.jpg.jpeg",
     "source_dimensions": "512x512",
     "source_bit_depth": 8,
     "source_color_profile": "Adobe RGB (1998)",

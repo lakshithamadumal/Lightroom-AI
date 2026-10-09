@@ -64,14 +64,14 @@ def get_base_dir() -> str:
 def get_resource_path(relative_path: str) -> str:
     """Returns absolute path to a resource, supporting PyInstaller bundled directories and source."""
     if getattr(sys, 'frozen', False):
-        if hasattr(sys, '_MEIPASS'):
-            candidate = os.path.join(sys._MEIPASS, relative_path)
-            if os.path.exists(candidate):
-                return candidate
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
         candidate2 = os.path.join(exe_dir, relative_path)
         if os.path.exists(candidate2):
             return candidate2
+        if hasattr(sys, '_MEIPASS'):
+            candidate = os.path.join(sys._MEIPASS, relative_path)
+            if os.path.exists(candidate):
+                return candidate
     base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, relative_path)
 
@@ -434,10 +434,13 @@ async def api_install_master_preset(req: InstallMasterPresetRequest):
     if not req.hald_path or not os.path.exists(req.hald_path):
         raise HTTPException(status_code=400, detail=f"HALD file not found: {req.hald_path}")
 
+    calib_dir = get_resource_path("calibration")
+    backup_dir = os.path.join(get_base_dir(), "presets", "test_preset_backup")
+
     res = CalibrationEngine.install_master_preset(
         hald_source=req.hald_path,
-        calibration_dir="calibration",
-        backup_dir="presets/test_preset_backup",
+        calibration_dir=calib_dir,
+        backup_dir=backup_dir,
         preset_name=req.preset_name or "Master Studio Preset"
     )
 
@@ -449,7 +452,7 @@ async def api_install_master_preset(req: InstallMasterPresetRequest):
     load_dotenv(override=True)
 
     # Reload preset manager
-    preset_mgr = PresetManager(preset_folder="calibration")
+    preset_mgr = PresetManager(preset_folder=calib_dir)
     res["active_preset"] = preset_mgr.preset_name
     res["summary"] = preset_mgr.get_summary_text()
     return res
@@ -458,7 +461,7 @@ async def api_install_master_preset(req: InstallMasterPresetRequest):
 @app.post("/api/presets/install-master-upload")
 async def api_install_master_upload(file: UploadFile = File(...), preset_name: Optional[str] = Form("Master Studio Preset")):
     """Uploads a HALD PNG/TIFF and installs it directly as the Master Studio Preset."""
-    temp_dir = os.path.abspath("temp_hald_upload")
+    temp_dir = os.path.join(get_base_dir(), "temp_hald_upload")
     os.makedirs(temp_dir, exist_ok=True)
     temp_path = os.path.join(temp_dir, file.filename)
     try:
@@ -466,10 +469,13 @@ async def api_install_master_upload(file: UploadFile = File(...), preset_name: O
             content = await file.read()
             f.write(content)
 
+        calib_dir = get_resource_path("calibration")
+        backup_dir = os.path.join(get_base_dir(), "presets", "test_preset_backup")
+
         res = CalibrationEngine.install_master_preset(
             hald_source=temp_path,
-            calibration_dir="calibration",
-            backup_dir="presets/test_preset_backup",
+            calibration_dir=calib_dir,
+            backup_dir=backup_dir,
             preset_name=preset_name,
             source_filename=file.filename
         )
@@ -481,7 +487,7 @@ async def api_install_master_upload(file: UploadFile = File(...), preset_name: O
         set_key(ENV_FILE_PATH, "PRESET_FOLDER", "calibration")
         load_dotenv(override=True)
 
-        preset_mgr = PresetManager(preset_folder="calibration")
+        preset_mgr = PresetManager(preset_folder=calib_dir)
         res["active_preset"] = preset_mgr.preset_name
         res["summary"] = preset_mgr.get_summary_text()
         return res

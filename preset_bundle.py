@@ -140,10 +140,21 @@ class PresetBundle:
             except Exception as e:
                 print(f"   > [PRESET BUNDLE] Error reading {json_path}: {e}")
 
-        # Check for .cube file
-        cube_files = [f for f in os.listdir(dir_path) if f.lower().endswith(".cube")]
-        if cube_files:
-            cube_path = os.path.join(dir_path, cube_files[0])
+        # Check for .cube file (prioritize declared lut_file, calibrated cube, or preset cube)
+        cube_path = None
+        lut_file_cfg = cfg.get("lut_file") if "cfg" in locals() and isinstance(cfg, dict) else None
+        if lut_file_cfg and os.path.exists(os.path.join(dir_path, lut_file_cfg)):
+            cube_path = os.path.join(dir_path, lut_file_cfg)
+        elif os.path.exists(os.path.join(dir_path, "preset_calibrated.cube")):
+            cube_path = os.path.join(dir_path, "preset_calibrated.cube")
+        elif os.path.exists(os.path.join(dir_path, "preset.cube")):
+            cube_path = os.path.join(dir_path, "preset.cube")
+        else:
+            cube_files = [f for f in os.listdir(dir_path) if f.lower().endswith(".cube")]
+            if cube_files:
+                cube_path = os.path.join(dir_path, cube_files[0])
+
+        if cube_path:
             try:
                 lut_obj = Lut3D.from_cube_file(cube_path)
             except Exception as e:
@@ -216,15 +227,14 @@ class PresetBundle:
         if not os.path.exists(target_path):
             import sys
             if getattr(sys, 'frozen', False):
-                if hasattr(sys, '_MEIPASS'):
+                exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+                candidate2 = os.path.join(exe_dir, target_path)
+                if os.path.exists(candidate2):
+                    target_path = candidate2
+                elif hasattr(sys, '_MEIPASS'):
                     candidate = os.path.join(sys._MEIPASS, target_path)
                     if os.path.exists(candidate):
                         target_path = candidate
-                if not os.path.exists(target_path):
-                    exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-                    candidate2 = os.path.join(exe_dir, target_path)
-                    if os.path.exists(candidate2):
-                        target_path = candidate2
             if not os.path.exists(target_path):
                 # Fallback default
                 return cls(preset_id="default_profile", name="Default Profile")
